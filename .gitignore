@@ -18,4 +18,4 @@ firebase-config.json
 Thumbs.db
 .streamlit/secrets.toml
 *.log
-config/firebase_config.py
+config\firebase_config.py
