@@ -43,6 +43,36 @@ def render_admin_login():
     
     st.info(f"💡 Email: {ADMIN_EMAIL} / Password: meowmeow123")
 
+def cleanup_all_documents():
+    """Delete ALL documents - DANGER ZONE"""
+    st.error("⚠️ DANGER ZONE: This will DELETE ALL uploaded files permanently!")
+    
+    confirm = st.text_input(
+        "Type 'DELETE ALL' to confirm:",
+        key="confirm_delete_all"
+    )
+    
+    if confirm == "DELETE ALL":
+        if st.button("🗑️ PERMANENTLY DELETE ALL DOCUMENTS", type="primary"):
+            try:
+                all_files = list(db.collection('uploaded_files').stream())
+                deleted_count = 0
+                
+                progress_bar = st.progress(0)
+                
+                for idx, doc in enumerate(all_files):
+                    db.collection('uploaded_files').document(doc.id).delete()
+                    deleted_count += 1
+                    progress_bar.progress((idx + 1) / len(all_files))
+                
+                st.success(f"✅ Deleted {deleted_count} documents!")
+                st.balloons()
+                time.sleep(2)
+                st.rerun()
+                
+            except Exception as e:
+                st.error(f"Error: {e}")
+
 def render_admin_panel():
     """Render admin panel for approving resources"""
     
@@ -65,34 +95,28 @@ def render_admin_panel():
     st.write("Resource Approval Center")
     st.write(f"Logged in as: **{st.session_state.get('admin_email', 'admin')}**")
     
-    tab1, tab2, tab3, tab4 = st.tabs(["⏳ Pending Approval", "✅ Approved", "📊 Statistics", "➕ Manage Subjects"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "⏳ Pending Approval", 
+        "✅ Approved", 
+        "📊 Statistics", 
+        "➕ Manage Subjects",
+        "🗑️ Cleanup"
+    ])
     
     with tab1:
         st.subheader("Pending Resources")
         
         try:
             # Get ALL files first
-            st.info("🔍 Fetching files from Firebase...")
             all_files = list(db.collection('uploaded_files').stream())
             
-            st.success(f"✅ Found {len(all_files)} total files in database")
-            
             # Filter for pending files
-            pending_files = []
-            for doc in all_files:
-                file_data = doc.to_dict()
-                verified = file_data.get('verified', False)
-                st.write(f"Debug: File {file_data.get('file_name', 'Unknown')} - Verified: {verified}")
-                if not verified:
-                    pending_files.append(doc)
-            
-            st.write(f"📋 Pending files count: {len(pending_files)}")
+            pending_files = [doc for doc in all_files if not doc.to_dict().get('verified', False)]
             
             if len(pending_files) == 0:
-                st.warning("🎉 No pending resources! All caught up~")
-                st.info("💡 Tip: Try uploading a file from the dashboard to test the approval system")
+                st.success("🎉 No pending resources! All caught up~")
             else:
-                st.success(f"Found {len(pending_files)} pending resources")
+                st.info(f"Found {len(pending_files)} pending resources")
                 
                 for doc in pending_files:
                     file_data = doc.to_dict()
@@ -109,47 +133,33 @@ def render_admin_panel():
                             **📄 {file_data.get('file_name', 'Unknown')}**
                             
                             - **Subject:** {file_data.get('subject', 'N/A')}
-                            - **Uploaded by:** {file_data.get('user_id', 'Unknown')[:12]}...
                             - **Size:** {file_data.get('file_size', 0) / 1024:.2f} KB
                             - **Date:** {time_str}
-                            
-                            ⏳ **Status:** Pending Approval
                         """)
                     
                     with col2:
-                        st.write("")  # Spacing
-                        if st.button("✅ Approve", key=f"approve_{doc.id}", use_container_width=True, type="primary"):
-                            try:
-                                db.collection('uploaded_files').document(doc.id).update({
-                                    'verified': True,
-                                    'approved_by': st.session_state.get('admin_email', 'admin'),
-                                    'approved_at': datetime.now()
-                                })
-                                st.success("✨ Resource approved!")
-                                st.balloons()
-                                time.sleep(1)
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Error approving: {e}")
+                        if st.button("✅", key=f"approve_{doc.id}", use_container_width=True):
+                            db.collection('uploaded_files').document(doc.id).update({
+                                'verified': True,
+                                'approved_at': datetime.now()
+                            })
+                            st.success("Approved!")
+                            time.sleep(1)
+                            st.rerun()
                         
-                        if st.button("❌ Reject", key=f"reject_{doc.id}", use_container_width=True):
-                            try:
-                                db.collection('uploaded_files').document(doc.id).delete()
-                                st.warning("Resource rejected and removed")
-                                time.sleep(1)
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Error rejecting: {e}")
+                        if st.button("❌", key=f"reject_{doc.id}", use_container_width=True):
+                            db.collection('uploaded_files').document(doc.id).delete()
+                            st.warning("Deleted!")
+                            time.sleep(1)
+                            st.rerun()
         
         except Exception as e:
-            st.error(f"Error loading resources: {e}")
-            st.exception(e)
+            st.error(f"Error: {e}")
     
     with tab2:
         st.subheader("Approved Resources")
         
         try:
-            # Get approved files
             all_files = list(db.collection('uploaded_files').stream())
             approved_files = [doc for doc in all_files if doc.to_dict().get('verified', False)]
             
@@ -158,22 +168,12 @@ def render_admin_panel():
             else:
                 st.success(f"Found {len(approved_files)} approved resources")
                 
-                for doc in approved_files[:20]:  # Show first 20
+                for doc in approved_files[:20]:
                     file_data = doc.to_dict()
-                    
-                    st.markdown("---")
-                    st.markdown(f"""
-                        **📄 {file_data.get('file_name', 'Unknown')}**
-                        
-                        - **Subject:** {file_data.get('subject', 'N/A')}
-                        - **Approved by:** {file_data.get('approved_by', 'Unknown')}
-                        
-                        ✅ **Status:** Approved
-                    """)
+                    st.markdown(f"📄 **{file_data.get('file_name', 'Unknown')}** - {file_data.get('subject', 'N/A')}")
         
         except Exception as e:
-            st.error(f"Error loading resources: {e}")
-            st.exception(e)
+            st.error(f"Error: {e}")
     
     with tab3:
         st.subheader("Platform Statistics")
@@ -183,120 +183,80 @@ def render_admin_panel():
             pending_count = sum(1 for f in all_files if not f.to_dict().get('verified', False))
             approved_count = sum(1 for f in all_files if f.to_dict().get('verified', False))
             
-            all_sessions = list(db.collection('sessions').stream())
-            unique_users = len(set(s.to_dict().get('user_id', '') for s in all_sessions))
-            
-            all_interactions = list(db.collection('interactions').stream())
-            total_messages = sum(1 for i in all_interactions if i.to_dict().get('event_type') == 'message_sent')
-            
-            col1, col2, col3, col4 = st.columns(4)
+            col1, col2, col3 = st.columns(3)
             
             with col1:
-                st.metric("Total Resources", len(all_files), delta=f"+{pending_count} pending")
+                st.metric("Total Resources", len(all_files))
             
             with col2:
-                st.metric("Approved", approved_count)
+                st.metric("Pending", pending_count)
             
             with col3:
-                st.metric("Total Users", unique_users)
-            
-            with col4:
-                st.metric("Messages Sent", total_messages)
-            
-            st.markdown("---")
-            
-            st.subheader("Resources by Subject")
-            subject_counts = {}
-            for doc in all_files:
-                subject = doc.to_dict().get('subject', 'Unknown')
-                subject_counts[subject] = subject_counts.get(subject, 0) + 1
-            
-            if subject_counts:
-                for subject, count in subject_counts.items():
-                    st.write(f"**{subject}:** {count} resources")
-            else:
-                st.info("No resources uploaded yet")
+                st.metric("Approved", approved_count)
         
         except Exception as e:
-            st.error(f"Error loading statistics: {e}")
-            st.exception(e)
+            st.error(f"Error: {e}")
     
     with tab4:
         st.subheader("📚 Manage Subjects")
         
-        # Add new subject
-        st.markdown("### ➕ Add New Subject")
-        
         col1, col2 = st.columns(2)
         
         with col1:
-            new_subject_name = st.text_input("Subject Name", placeholder="e.g., Chemistry", key="new_subj_name")
-            new_subject_category = st.text_input("Category", placeholder="e.g., O Levels, A Levels, University", key="new_subj_cat")
+            new_subject_name = st.text_input("Subject Name", placeholder="e.g., Chemistry")
+            new_subject_category = st.text_input("Category", placeholder="e.g., O Levels")
         
         with col2:
-            new_subject_icon = st.text_input("Icon (emoji)", placeholder="e.g., ⚗️", key="new_subj_icon")
-            new_subject_color = st.color_picker("Card Color", "#dbeafe", key="new_subj_color")
+            new_subject_icon = st.text_input("Icon", placeholder="e.g., ⚗️")
+            new_subject_color = st.color_picker("Color", "#dbeafe")
         
-        if st.button("➕ Add Subject", type="primary", use_container_width=True):
-            if new_subject_name and new_subject_category and new_subject_icon:
-                try:
-                    subject_id = new_subject_name.lower().replace(' ', '_')
-                    db.collection('subjects').document(subject_id).set({
-                        'id': subject_id,
-                        'name': new_subject_name,
-                        'category': new_subject_category,
-                        'icon': new_subject_icon,
-                        'color': new_subject_color,
-                        'created_at': datetime.now(),
-                        'created_by': st.session_state.get('admin_email', 'admin')
-                    })
-                    st.success(f"✨ Added {new_subject_name}!")
-                    st.balloons()
-                    time.sleep(1)
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error adding subject: {e}")
-            else:
-                st.error("Please fill in all fields")
+        if st.button("➕ Add Subject", type="primary"):
+            if new_subject_name:
+                db.collection('subjects').document(new_subject_name.lower().replace(' ', '_')).set({
+                    'name': new_subject_name,
+                    'category': new_subject_category,
+                    'icon': new_subject_icon,
+                    'color': new_subject_color,
+                    'created_at': datetime.now()
+                })
+                st.success(f"Added {new_subject_name}!")
+                time.sleep(1)
+                st.rerun()
+    
+    with tab5:
+        st.subheader("🗑️ Database Cleanup")
+        st.write("Remove orphaned documents without RAG data")
+        
+        cleanup_all_documents()
         
         st.markdown("---")
-        st.markdown("### 📋 Existing Subjects")
         
+        st.subheader("📋 Current Documents")
         try:
-            subjects = list(db.collection('subjects').stream())
+            all_files = list(db.collection('uploaded_files').stream())
             
-            if len(subjects) == 0:
-                st.info("No subjects added yet. Add some above!")
+            if len(all_files) == 0:
+                st.success("✅ Database is clean!")
             else:
-                for doc in subjects:
-                    subject_data = doc.to_dict()
-                    
+                st.warning(f"{len(all_files)} documents in database")
+                
+                for doc in all_files[:10]:
+                    file_data = doc.to_dict()
                     col1, col2 = st.columns([4, 1])
                     
                     with col1:
-                        st.markdown(f"""
-                            {subject_data.get('icon', '📚')} **{subject_data.get('name', 'Unknown')}** 
-                            ({subject_data.get('category', 'General')})
-                        """)
+                        st.write(f"📄 {file_data.get('file_name', 'Unknown')}")
                     
                     with col2:
-                        if st.button("🗑️ Delete", key=f"del_subj_{doc.id}"):
-                            db.collection('subjects').document(doc.id).delete()
-                            st.success("Deleted!")
-                            time.sleep(1)
+                        if st.button("🗑️", key=f"del_{doc.id}"):
+                            db.collection('uploaded_files').document(doc.id).delete()
                             st.rerun()
-                    
-                    st.divider()
         
         except Exception as e:
-            st.error(f"Error loading subjects: {e}")
+            st.error(f"Error: {e}")
     
     st.markdown("---")
     
-    # Logout button
     if st.button("🚪 Logout from Admin", use_container_width=True):
         st.session_state.admin_authenticated = False
-        st.session_state.admin_email = None
-        st.success("Logged out from admin panel")
-        time.sleep(1)
         st.rerun()
