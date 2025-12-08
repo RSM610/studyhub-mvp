@@ -19,8 +19,11 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Admin email from secrets
-ADMIN_EMAIL = st.secrets.get("admin", {}).get("email", "u2023610@giki.edu.pk")
+# Admin email from secrets with fallback
+try:
+    ADMIN_EMAIL = st.secrets.get("admin", {}).get("email", "u2023610@giki.edu.pk")
+except:
+    ADMIN_EMAIL = "u2023610@giki.edu.pk"
 
 if 'user' not in st.session_state:
     st.session_state.user = None

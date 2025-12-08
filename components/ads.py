@@ -3,6 +3,38 @@ import time
 from utils.metrics import MetricsTracker
 from utils.firebase_ops import FirebaseOps
 import streamlit.components.v1 as components
+import base64
+from pathlib import Path
+
+def get_dummy_ad_image():
+    """Return base64 encoded placeholder image or use user's custom image"""
+    # Check if custom ad image exists
+    custom_img = Path("assets/ad_placeholder.png")
+    
+    if custom_img.exists():
+        with open(custom_img, "rb") as f:
+            img_data = f.read()
+            return base64.b64encode(img_data).decode()
+    
+    # Return SVG placeholder if no custom image
+    svg_placeholder = """
+    <svg width="800" height="500" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" style="stop-color:#a78bfa;stop-opacity:1" />
+          <stop offset="100%" style="stop-color:#ec4899;stop-opacity:1" />
+        </linearGradient>
+      </defs>
+      <rect width="800" height="500" fill="url(#grad1)" rx="30"/>
+      <text x="400" y="200" font-family="Arial, sans-serif" font-size="80" fill="white" text-anchor="middle">🎀</text>
+      <text x="400" y="280" font-family="Arial, sans-serif" font-size="48" font-weight="bold" fill="white" text-anchor="middle">Your Ad Here</text>
+      <text x="400" y="330" font-family="Arial, sans-serif" font-size="24" fill="white" text-anchor="middle">Ready for PropellerAds</text>
+      <text x="400" y="380" font-family="Arial, sans-serif" font-size="18" fill="rgba(255,255,255,0.8)" text-anchor="middle">Replace assets/ad_placeholder.png with your ad image</text>
+      <rect x="300" y="420" width="200" height="50" rx="10" fill="white" fill-opacity="0.2"/>
+      <text x="400" y="453" font-family="Arial, sans-serif" font-size="20" font-weight="bold" fill="white" text-anchor="middle">Get Started →</text>
+    </svg>
+    """
+    return base64.b64encode(svg_placeholder.encode()).decode()
 
 def show_ad():
     """Display advertisement with countdown - PropellerAds ready"""
@@ -50,49 +82,26 @@ def show_ad():
     
     countdown_placeholder = st.empty()
     
-    # PropellerAds Integration - RESPONSIVE LARGE AD
-    propellerads_html = """
-    <div style="text-align: center; margin: 30px auto; width: 100%; max-width: 1200px; padding: 0 20px; box-sizing: border-box;">
-        <div id="propeller-ad-container" style="width: 100%; min-height: 500px; display: flex; align-items: center; justify-content: center;">
-            <!-- PropellerAds Banner -->
-            <!-- Replace YOUR_ZONE_ID with your actual Zone ID from PropellerAds -->
-            
-            <!-- Uncomment after getting Zone ID:
-            <script type="text/javascript">
-                atOptions = {
-                    'key' : 'YOUR_ZONE_ID',
-                    'format' : 'iframe',
-                    'height' : 500,
-                    'width' : 728,
-                    'params' : {}
-                };
-            </script>
-            <script type="text/javascript" src="//www.topcreativeformat.com/YOUR_ZONE_ID/invoke.js"></script>
-            -->
-            
-            <!-- Default placeholder -->
-            <div style="background: white; padding: 60px 40px; border-radius: 30px; 
-                 border: 4px dashed #d8b4fe; min-height: 500px; width: 100%; max-width: 800px;
-                 display: flex; align-items: center; justify-content: center; flex-direction: column;
-                 box-shadow: 0 10px 40px rgba(167, 139, 250, 0.3); box-sizing: border-box;">
-                <div style="font-size: 6rem; margin-bottom: 30px;">🎀</div>
-                <h1 style="color: #7c3aed; margin-bottom: 20px; font-size: 3rem; text-align: center;">Ad Space</h1>
-                <p style="color: #a855f7; font-size: 1.5rem; margin-bottom: 15px; font-weight: 600; text-align: center;">Ready for PropellerAds</p>
-                <p style="color: #c084fc; font-size: 1rem; text-align: center; padding: 0 20px; margin-bottom: 30px; line-height: 1.6; max-width: 600px;">
-                    Sign up at PropellerAds and add your Zone ID to start earning revenue from your student platform
-                </p>
-                <a href="https://publishers.propellerads.com/" target="_blank" 
-                   style="padding: 15px 40px; background: linear-gradient(135deg, #a78bfa 0%, #ec4899 100%);
-                   color: white; text-decoration: none; border-radius: 15px; font-weight: 700; font-size: 1.2rem;
-                   box-shadow: 0 8px 25px rgba(167, 139, 250, 0.4); transition: all 0.3s ease; display: inline-block;">
-                    Get Started →
-                </a>
-            </div>
-        </div>
-    </div>
-    """
+    # Get ad image
+    ad_image_b64 = get_dummy_ad_image()
     
-    components.html(propellerads_html, height=600)
+    # Display ad image
+    st.markdown(f"""
+        <div style="text-align: center; margin: 30px auto; max-width: 100%; padding: 0 20px; box-sizing: border-box;">
+            <img src="data:image/png;base64,{ad_image_b64}" 
+                 style="max-width: 100%; height: auto; border-radius: 20px; box-shadow: 0 10px 40px rgba(167, 139, 250, 0.3);" 
+                 alt="Advertisement" />
+        </div>
+    """, unsafe_allow_html=True)
+    
+    st.markdown("""
+        <div style="text-align: center; margin-top: 20px; color: #9333ea; font-size: 0.9rem;">
+            💡 <strong>To add your ad:</strong><br>
+            1. Create folder: <code>assets/</code><br>
+            2. Add image: <code>assets/ad_placeholder.png</code><br>
+            3. Or integrate PropellerAds script above
+        </div>
+    """, unsafe_allow_html=True)
     
     # Countdown
     for i in range(15, 0, -1):

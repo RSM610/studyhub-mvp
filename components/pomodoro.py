@@ -89,8 +89,11 @@ class PomodoroTimer:
     @staticmethod
     def render_timer():
         """Render the pomodoro timer - non-blocking"""
-        PomodoroTimer.init_pomodoro()
-        PomodoroTimer.check_plant_health()
+        try:
+            PomodoroTimer.init_pomodoro()
+            PomodoroTimer.check_plant_health()
+        except:
+            return  # Gracefully fail if there's an issue
         
         st.markdown("""
             <style>
@@ -178,6 +181,8 @@ class PomodoroTimer:
                 PomodoroTimer.water_plant()
                 st.rerun()
         
-        # Auto-refresh if timer is running
+        # Auto-refresh if timer is running (but not too often to avoid crashes)
         if st.session_state.pomo_running:
+            import time as pytime
+            pytime.sleep(0.5)  # Small delay to prevent rapid reruns
             st.rerun()

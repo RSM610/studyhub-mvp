@@ -1,32 +1,49 @@
 import streamlit as st
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
-from openai import OpenAI
+from sentence_transformers import SentenceTransformer
 import hashlib
 from datetime import datetime
 import PyPDF2
 import io
 
 class QdrantRAG:
-    """Handle all Qdrant vector database operations for RAG"""
+    """Handle all Qdrant vector database operations for RAG - FREE VERSION"""
+    
+    # Cache the embedding model (loaded once)
+    _embedding_model = None
     
     @staticmethod
     def get_client():
         """Get Qdrant client from secrets"""
-        return QdrantClient(
-            url=st.secrets["qdrant"]["url"],
-            api_key=st.secrets["qdrant"]["api_key"]
-        )
+        try:
+            return QdrantClient(
+                url=st.secrets["qdrant"]["url"],
+                api_key=st.secrets["qdrant"]["api_key"]
+            )
+        except Exception as e:
+            st.warning(f"⚠️ Qdrant not configured. RAG features disabled. Add Qdrant credentials to secrets.toml")
+            return None
     
     @staticmethod
-    def get_openai_client():
-        """Get OpenAI client for embeddings and chat"""
-        return OpenAI(api_key=st.secrets["openai"]["api_key"])
+    @st.cache_resource
+    def get_embedding_model():
+        """Get FREE Hugging Face embedding model (cached)"""
+        if QdrantRAG._embedding_model is None:
+            try:
+                # Use free, lightweight model: all-MiniLM-L6-v2 (384 dimensions)
+                QdrantRAG._embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+            except Exception as e:
+                st.error(f"Failed to load embedding model: {e}")
+                return None
+        return QdrantRAG._embedding_model
     
     @staticmethod
     def create_collection_if_not_exists(collection_name):
         """Create Qdrant collection if it doesn't exist"""
         client = QdrantRAG.get_client()
+        if not client:
+            return False
         
         try:
             collections = client.get_collections().collections
@@ -35,7 +52,7 @@ class QdrantRAG:
             if not exists:
                 client.create_collection(
                     collection_name=collection_name,
-                    vectors_config=VectorParams(size=1536, distance=Distance.COSINE)  # OpenAI text-embedding-3-small
+                    vectors_config=VectorParams(size=384, distance=Distance.COSINE)  # all-MiniLM-L6-v2 = 384-dim
                 )
                 return True
             return False
@@ -45,14 +62,16 @@ class QdrantRAG:
     
     @staticmethod
     def get_embeddings(text):
-        """Get embeddings using OpenAI"""
+        """Get embeddings using FREE Hugging Face model"""
         try:
-            client = QdrantRAG.get_openai_client()
-            response = client.embeddings.create(
-                input=text,
-                model="text-embedding-3-small"
-            )
-            return response.data[0].embedding
+            model = QdrantRAG.get_embedding_model()
+            if not model:
+                return None
+            
+            # Generate embedding
+            embedding = model.encode(text, convert_to_numpy=True)
+            return embedding.tolist()
+            
         except Exception as e:
             st.error(f"Error getting embeddings: {e}")
             return None
@@ -81,10 +100,14 @@ class QdrantRAG:
     @staticmethod
     def upload_document_to_qdrant(file_name, file_content, subject, user_id, doc_id):
         """
-        Process document and upload to Qdrant
+        Process document and upload to Qdrant using FREE embeddings
         """
         try:
             client = QdrantRAG.get_client()
+            if not client:
+                st.warning("⚠️ Qdrant not configured - file saved to Firebase only")
+                return 0
+            
             collection_name = f"subject_{subject.lower().replace(' ', '_').replace('+', '').replace('(', '').replace(')', '')}"
             
             # Create collection
@@ -146,9 +169,12 @@ class QdrantRAG:
     
     @staticmethod
     def search_documents(query, subject, limit=5):
-        """Search Qdrant for relevant document chunks"""
+        """Search Qdrant for relevant document chunks using FREE embeddings"""
         try:
             client = QdrantRAG.get_client()
+            if not client:
+                return []
+            
             collection_name = f"subject_{subject.lower().replace(' ', '_').replace('+', '').replace('(', '').replace(')', '')}"
             
             # Get query embedding
@@ -181,50 +207,42 @@ class QdrantRAG:
     
     @staticmethod
     def generate_rag_response(query, subject, language="English"):
-        """Generate RAG response using OpenAI GPT-4"""
+        """
+        Generate RAG response using FREE local model or simple context retrieval
+        """
         try:
             # Search for relevant documents
             documents = QdrantRAG.search_documents(query, subject, limit=5)
             
             if not documents:
-                return f"I couldn't find relevant information about '{query}' in the uploaded {subject} materials. Try uploading notes or past papers first!"
+                return f"❌ I couldn't find relevant information about '{query}' in the uploaded {subject} materials.\n\n💡 Try:\n- Uploading notes or past papers\n- Asking about topics covered in uploaded files\n- Using different keywords"
             
-            # Build context
+            # Build context from retrieved documents
             context = "\n\n".join([
-                f"From {doc['file_name']} (relevance: {doc['score']:.2f}):\n{doc['text']}"
+                f"📄 From {doc['file_name']} (relevance: {doc['score']:.2f}):\n{doc['text'][:500]}..."
                 for doc in documents
             ])
             
-            # Generate response with GPT-4
-            client = QdrantRAG.get_openai_client()
+            # Simple response without LLM (FREE version)
+            response = f"📚 **Found {len(documents)} relevant sections in your {subject} materials:**\n\n"
+            response += context
+            response += f"\n\n💡 **Summary:** Based on the uploaded materials, the information above is most relevant to your question: '{query}'\n\n"
+            response += f"🌍 **Language Note:** Full AI-generated responses in {language} require an LLM API (OpenAI/Anthropic). Currently showing raw document excerpts."
             
-            response = client.chat.completions.create(
-                model="gpt-4-turbo-preview",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": f"You are a helpful study assistant for {subject}. Answer questions based ONLY on the provided context. Respond in {language}. If the context doesn't contain relevant information, say so clearly."
-                    },
-                    {
-                        "role": "user",
-                        "content": f"Context from uploaded materials:\n\n{context}\n\nQuestion: {query}"
-                    }
-                ],
-                max_tokens=1000,
-                temperature=0.7
-            )
-            
-            return response.choices[0].message.content
+            return response
             
         except Exception as e:
             st.error(f"Error generating response: {e}")
-            return f"Error: {str(e)}"
+            return f"❌ Error: {str(e)}\n\nPlease check your Qdrant connection."
     
     @staticmethod
     def get_document_summary(file_name, subject):
         """Get summary of a specific document"""
         try:
             client = QdrantRAG.get_client()
+            if not client:
+                return "⚠️ Qdrant not configured"
+            
             collection_name = f"subject_{subject.lower().replace(' ', '_').replace('+', '').replace('(', '').replace(')', '')}"
             
             # Get all chunks from this file
@@ -241,21 +259,11 @@ class QdrantRAG:
             if not results[0]:
                 return "No content found."
             
-            # Combine chunks
-            full_text = " ".join([point.payload.get("text", "") for point in results[0]])
+            # Combine first few chunks as summary
+            chunks = [point.payload.get("text", "") for point in results[0][:3]]
+            summary = "\n\n".join(chunks)
             
-            # Generate summary with GPT
-            openai_client = QdrantRAG.get_openai_client()
-            
-            response = openai_client.chat.completions.create(
-                model="gpt-4-turbo-preview",
-                messages=[
-                    {"role": "user", "content": f"Provide a concise summary:\n\n{full_text[:4000]}"}
-                ],
-                max_tokens=300
-            )
-            
-            return response.choices[0].message.content
+            return f"📄 **{file_name}**\n\n{summary[:1000]}...\n\n💡 Contains {len(results[0])} sections total."
             
         except Exception as e:
             return f"Error: {str(e)}"
