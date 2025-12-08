@@ -22,7 +22,7 @@ class QdrantRAG:
                 api_key=st.secrets["qdrant"]["api_key"]
             )
         except Exception as e:
-            st.warning(f"⚠️ Qdrant not configured. RAG features disabled. Add Qdrant credentials to secrets.toml")
+            st.warning(f"⚠️ Qdrant not configured. Add credentials to secrets.toml")
             return None
     
     @staticmethod
@@ -52,7 +52,7 @@ class QdrantRAG:
             if not exists:
                 client.create_collection(
                     collection_name=collection_name,
-                    vectors_config=VectorParams(size=384, distance=Distance.COSINE)  # all-MiniLM-L6-v2 = 384-dim
+                    vectors_config=VectorParams(size=384, distance=Distance.COSINE)
                 )
                 return True
             return False
@@ -135,7 +135,8 @@ class QdrantRAG:
                 embedding = QdrantRAG.get_embeddings(chunk)
                 
                 if embedding:
-                    point_id = hashlib.md5(f"{doc_id}_{idx}".encode()).hexdigest()
+                    # Use integer IDs (Qdrant prefers this over strings)
+                    point_id = abs(hash(f"{doc_id}_{idx}")) % (2**31)
                     
                     points.append(
                         PointStruct(
@@ -176,6 +177,14 @@ class QdrantRAG:
                 return []
             
             collection_name = f"subject_{subject.lower().replace(' ', '_').replace('+', '').replace('(', '').replace(')', '')}"
+            
+            # Check if collection exists
+            try:
+                collections = client.get_collections().collections
+                if not any(col.name == collection_name for col in collections):
+                    return []
+            except:
+                return []
             
             # Get query embedding
             query_embedding = QdrantRAG.get_embeddings(query)
@@ -227,7 +236,9 @@ class QdrantRAG:
             response = f"📚 **Found {len(documents)} relevant sections in your {subject} materials:**\n\n"
             response += context
             response += f"\n\n💡 **Summary:** Based on the uploaded materials, the information above is most relevant to your question: '{query}'\n\n"
-            response += f"🌍 **Language Note:** Full AI-generated responses in {language} require an LLM API (OpenAI/Anthropic). Currently showing raw document excerpts."
+            
+            if language != "English":
+                response += f"🌍 **Language Note:** Full AI-generated responses in {language} require an LLM API (OpenAI/Anthropic). Currently showing raw document excerpts."
             
             return response
             
@@ -237,7 +248,7 @@ class QdrantRAG:
     
     @staticmethod
     def get_document_summary(file_name, subject):
-        """Get summary of a specific document"""
+        """Get summary of a specific document - FIXED to avoid index error"""
         try:
             client = QdrantRAG.get_client()
             if not client:
@@ -245,28 +256,48 @@ class QdrantRAG:
             
             collection_name = f"subject_{subject.lower().replace(' ', '_').replace('+', '').replace('(', '').replace(')', '')}"
             
-            # Get all chunks from this file
-            results = client.scroll(
-                collection_name=collection_name,
-                scroll_filter={
-                    "must": [
-                        {"key": "file_name", "match": {"value": file_name}}
-                    ]
-                },
-                limit=100
-            )
+            # Check if collection exists
+            try:
+                collections = client.get_collections().collections
+                if not any(col.name == collection_name for col in collections):
+                    return f"No collection found for {subject}"
+            except:
+                return "Error checking collections"
             
-            if not results[0]:
-                return "No content found."
+            # Get ALL points from collection (no filter to avoid index requirement)
+            try:
+                results = client.scroll(
+                    collection_name=collection_name,
+                    limit=100,
+                    with_payload=True,
+                    with_vectors=False
+                )
+            except Exception as e:
+                return f"Error scrolling collection: {str(e)}"
+            
+            if not results or not results[0]:
+                return "No content found in collection."
+            
+            # Filter for matching file_name in Python (avoids Qdrant index requirement)
+            matching_chunks = [
+                point for point in results[0]
+                if point.payload.get("file_name") == file_name
+            ]
+            
+            if not matching_chunks:
+                return f"No chunks found for '{file_name}' in this collection.\n\nAvailable files: {', '.join(set(p.payload.get('file_name', 'Unknown') for p in results[0][:10]))}"
+            
+            # Sort by chunk_index to get them in order
+            matching_chunks.sort(key=lambda x: x.payload.get("chunk_index", 0))
             
             # Combine first few chunks as summary
-            chunks = [point.payload.get("text", "") for point in results[0][:3]]
+            chunks = [point.payload.get("text", "") for point in matching_chunks[:3]]
             summary = "\n\n".join(chunks)
             
-            return f"📄 **{file_name}**\n\n{summary[:1000]}...\n\n💡 Contains {len(results[0])} sections total."
+            return f"📄 **{file_name}**\n\n{summary[:1000]}...\n\n💡 Contains {len(matching_chunks)} sections total."
             
         except Exception as e:
-            return f"Error: {str(e)}"
+            return f"Error getting summary: {str(e)}"
     
     @staticmethod
     def create_collections_for_existing_subjects():

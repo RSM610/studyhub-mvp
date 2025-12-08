@@ -5,8 +5,21 @@ from utils.qdrant_ops import QdrantRAG
 from config.firebase_config import db
 
 def render_chat():
-    """Render AI chat interface with REAL RAG functionality"""
+    """Render AI chat interface with REAL RAG functionality - separate history per subject"""
     subject = st.session_state.selected_subject
+    
+    # Generate unique key for this subject's chat history
+    subject_key = f"{subject['name']}_{subject.get('category', 'General')}".replace(' ', '_')
+    
+    # Initialize subject-specific chat history
+    if 'chat_histories' not in st.session_state:
+        st.session_state.chat_histories = {}
+    
+    if subject_key not in st.session_state.chat_histories:
+        st.session_state.chat_histories[subject_key] = []
+    
+    # Use subject-specific messages
+    messages = st.session_state.chat_histories[subject_key]
     
     st.markdown("""
         <style>
@@ -34,9 +47,18 @@ def render_chat():
         </style>
     """, unsafe_allow_html=True)
     
-    if st.button("← Back to subjects", key="back_btn"):
-        st.session_state.selected_subject = None
-        st.rerun()
+    col1, col2 = st.columns([1, 5])
+    
+    with col1:
+        if st.button("← Back", key="back_btn"):
+            st.session_state.selected_subject = None
+            st.rerun()
+    
+    with col2:
+        if st.button("🗑️ Clear Chat", key="clear_chat_btn"):
+            st.session_state.chat_histories[subject_key] = []
+            st.success("Chat history cleared!")
+            st.rerun()
     
     st.title(f"{subject['icon']} {subject['name']}")
     st.write(f"**{subject.get('category', 'General')}**")
@@ -72,9 +94,7 @@ def render_chat():
                 for idx, (doc_id, file_data) in enumerate(subject_files, 1):
                     response += f"{idx}. 📄 {file_data.get('file_name', 'Unknown')}\n"
             
-            if 'messages' not in st.session_state:
-                st.session_state.messages = []
-            st.session_state.messages.append({'role': 'assistant', 'content': response})
+            st.session_state.chat_histories[subject_key].append({'role': 'assistant', 'content': response})
             st.rerun()
     
     with col2:
@@ -89,9 +109,7 @@ def render_chat():
                         summary = QdrantRAG.get_document_summary(file_name, subject_full_name)
                         response += f"**{idx}. {file_name}**\n{summary}\n\n"
             
-            if 'messages' not in st.session_state:
-                st.session_state.messages = []
-            st.session_state.messages.append({'role': 'assistant', 'content': response})
+            st.session_state.chat_histories[subject_key].append({'role': 'assistant', 'content': response})
             st.rerun()
     
     with col3:
@@ -103,9 +121,7 @@ def render_chat():
             response += "• 'Explain [topic]'\n"
             response += "• 'Summarize the main points'"
             
-            if 'messages' not in st.session_state:
-                st.session_state.messages = []
-            st.session_state.messages.append({'role': 'assistant', 'content': response})
+            st.session_state.chat_histories[subject_key].append({'role': 'assistant', 'content': response})
             st.rerun()
     
     with col4:
@@ -113,16 +129,13 @@ def render_chat():
             if len(subject_files) == 0:
                 response = "📭 No documents to analyze yet."
             else:
-                # Use RAG to find common topics
                 response = f"💡 **Analyzing {len(subject_files)} documents...**\n\n"
                 response += "Available documents:\n"
                 for idx, (doc_id, file_data) in enumerate(subject_files, 1):
                     response += f"• {file_data.get('file_name', 'Unknown')}\n"
                 response += "\nAsk me about any topic and I'll search through these materials!"
             
-            if 'messages' not in st.session_state:
-                st.session_state.messages = []
-            st.session_state.messages.append({'role': 'assistant', 'content': response})
+            st.session_state.chat_histories[subject_key].append({'role': 'assistant', 'content': response})
             st.rerun()
     
     st.markdown("---")
@@ -138,25 +151,24 @@ def render_chat():
                     st.write(f"📄 **{file_data.get('file_name', 'Unknown')}**")
                     st.caption(f"Size: {file_data.get('file_size', 0) / 1024:.1f} KB")
                 with col2:
-                    if st.button("⬇️", key=f"dl_{doc_id}"):
-                        st.info("Upgrade to Blaze for downloads")
+                    st.caption("✅ Verified")
     
     st.markdown("---")
     
     # Language selector
-    col_lang, _ = st.columns([2, 3])
+    col_lang, col_count = st.columns([2, 3])
     with col_lang:
         language = st.selectbox(
             "🌍 Explain in:",
             ["English", "Urdu", "Arabic", "Spanish", "French", "German", "Chinese", "Japanese"],
-            key="language_select"
+            key=f"language_select_{subject_key}"
         )
     
-    if 'messages' not in st.session_state:
-        st.session_state.messages = []
+    with col_count:
+        st.caption(f"💬 {len(messages)} messages in this chat")
     
-    # Messages
-    if len(st.session_state.messages) == 0:
+    # Messages display
+    if len(messages) == 0:
         st.markdown(f"""
             <div style="text-align: center; padding: 60px 20px; color: #c084fc;">
                 <div style="font-size: 4rem; margin-bottom: 20px;">🤖</div>
@@ -165,7 +177,7 @@ def render_chat():
             </div>
         """, unsafe_allow_html=True)
     else:
-        for msg in st.session_state.messages:
+        for msg in messages:
             if msg['role'] == 'user':
                 st.markdown(f'<div class="user-message">{msg["content"]}</div>', unsafe_allow_html=True)
             else:
@@ -181,14 +193,15 @@ def render_chat():
             "Message",
             placeholder=f"Ask about {subject['name']}...",
             label_visibility="collapsed",
-            key="chat_input"
+            key=f"chat_input_{subject_key}"
         )
     
     with col2:
         send_btn = st.button("Send ✨", use_container_width=True, type="primary")
     
     if send_btn and prompt:
-        st.session_state.messages.append({'role': 'user', 'content': prompt})
+        # Add user message to THIS subject's history
+        st.session_state.chat_histories[subject_key].append({'role': 'user', 'content': prompt})
         
         user_id = st.session_state.user['id']
         FirebaseOps.log_interaction(user_id, 'message_sent', {
@@ -206,5 +219,6 @@ def render_chat():
                 language=language
             )
         
-        st.session_state.messages.append({'role': 'assistant', 'content': ai_response})
+        # Add AI response to THIS subject's history
+        st.session_state.chat_histories[subject_key].append({'role': 'assistant', 'content': ai_response})
         st.rerun()

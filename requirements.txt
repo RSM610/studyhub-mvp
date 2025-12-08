@@ -20,3 +20,6 @@ transformers>=4.36.0
 numpy==1.26.3
 python-dateutil==2.8.2
 python-dotenv==1.0.0
+
+qdrant-client==1.7.3
+sentence-transformers==2.3.1
