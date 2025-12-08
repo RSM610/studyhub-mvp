@@ -3,9 +3,10 @@ from utils.firebase_ops import FirebaseOps
 from utils.metrics import MetricsTracker
 from utils.qdrant_ops import QdrantRAG
 from config.firebase_config import db
+from firebase_admin import storage
 
 def render_chat():
-    """Render AI chat interface with REAL RAG functionality - separate history per subject"""
+    """Render AI chat interface with REAL RAG functionality and downloads"""
     subject = st.session_state.selected_subject
     
     # Generate unique key for this subject's chat history
@@ -43,6 +44,20 @@ def render_chat():
             max-width: 70%;
             border: 2px solid #fbcfe8;
             box-shadow: 0 4px 10px rgba(236, 72, 153, 0.2);
+        }
+        .download-btn {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 10px;
+            text-decoration: none;
+            display: inline-block;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+        .download-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
         }
         </style>
     """, unsafe_allow_html=True)
@@ -140,18 +155,43 @@ def render_chat():
     
     st.markdown("---")
     
-    # Show resources in expandable
-    with st.expander(f"📚 View {len(subject_files)} Resources", expanded=False):
+    # Show resources with DOWNLOAD functionality
+    with st.expander(f"📚 View & Download {len(subject_files)} Resources", expanded=False):
         if len(subject_files) == 0:
             st.info(f"No resources yet. Upload some materials to get started!")
         else:
             for doc_id, file_data in subject_files:
                 col1, col2 = st.columns([3, 1])
+                
                 with col1:
                     st.write(f"📄 **{file_data.get('file_name', 'Unknown')}**")
                     st.caption(f"Size: {file_data.get('file_size', 0) / 1024:.1f} KB")
+                
                 with col2:
-                    st.caption("✅ Verified")
+                    download_url = file_data.get('download_url')
+                    
+                    if download_url:
+                        # Direct download link
+                        st.markdown(f'<a href="{download_url}" class="download-btn" download>⬇️ Download</a>', unsafe_allow_html=True)
+                    else:
+                        # Try to get download URL from storage
+                        storage_path = file_data.get('storage_path')
+                        if storage_path:
+                            try:
+                                bucket = storage.bucket()
+                                blob = bucket.blob(storage_path)
+                                
+                                # Generate signed URL (valid for 1 hour)
+                                from datetime import timedelta
+                                signed_url = blob.generate_signed_url(timedelta(hours=1))
+                                
+                                st.markdown(f'<a href="{signed_url}" class="download-btn" download>⬇️ Download</a>', unsafe_allow_html=True)
+                            except Exception as e:
+                                st.caption("❌ Download unavailable")
+                        else:
+                            st.caption("⏳ Processing...")
+                
+                st.divider()
     
     st.markdown("---")
     

@@ -3,6 +3,8 @@ from utils.firebase_ops import FirebaseOps
 from utils.metrics import MetricsTracker
 from utils.qdrant_ops import QdrantRAG
 from config.firebase_config import db
+from firebase_admin import storage
+import io
 
 def render_dashboard():
     """Render cute main dashboard with subject selection"""
@@ -137,15 +139,25 @@ def render_dashboard():
         
         if st.button("✨ Upload Files", type="primary", use_container_width=True, key="upload_btn"):
             try:
-                with st.spinner("Uploading files to Firebase and Qdrant..."):
+                with st.spinner("Uploading files to Firebase Storage and Qdrant..."):
                     user_id = st.session_state.user['id']
+                    bucket = storage.bucket()
                     
                     success_count = 0
                     for file in uploaded_files:
                         try:
                             file_bytes = file.getvalue()
                             
-                            # Save to Firebase
+                            # Upload to Firebase Storage
+                            storage_path = f"uploads/{user_id}/{upload_subject}/{file.name}"
+                            blob = bucket.blob(storage_path)
+                            blob.upload_from_string(file_bytes, content_type=file.type)
+                            
+                            # Make file publicly accessible (or use signed URLs later)
+                            blob.make_public()
+                            download_url = blob.public_url
+                            
+                            # Save metadata to Firestore
                             result = FirebaseOps.save_uploaded_file(
                                 user_id,
                                 file.name,
@@ -155,6 +167,12 @@ def render_dashboard():
                             
                             if result:
                                 doc_id = result[1].id
+                                
+                                # Update with storage URL
+                                db.collection('uploaded_files').document(doc_id).update({
+                                    'storage_path': storage_path,
+                                    'download_url': download_url
+                                })
                                 
                                 # Upload to Qdrant for RAG
                                 with st.spinner(f"Processing {file.name} for AI search..."):
@@ -176,9 +194,9 @@ def render_dashboard():
                             st.error(f"Failed to upload {file.name}: {str(file_error)}")
                     
                     if success_count > 0:
-                        st.success(f"✨ Successfully uploaded {success_count}/{len(uploaded_files)} files!")
+                        st.success(f"✨ Successfully uploaded {success_count}/{len(uploaded_files)} files to Firebase Storage!")
                         st.balloons()
-                        st.info("⏳ Your files are pending admin approval. Once verified, they'll be searchable by AI!")
+                        st.info("⏳ Your files are pending admin approval. Once verified, they'll be downloadable and searchable by AI!")
                     else:
                         st.error("❌ No files were uploaded successfully. Please try again.")
                         
