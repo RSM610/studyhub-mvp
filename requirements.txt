@@ -6,19 +6,15 @@ firebase-admin==6.4.0
 google-cloud-firestore==2.14.0
 
 # Vector Database & RAG
-qdrant-client==1.7.0
+qdrant-client==1.7.3
 sentence-transformers==2.3.1
 
 # Document Processing
 PyPDF2==3.0.1
 
-# AI/ML Libraries
-torch==2.1.2
-transformers==4.36.0
-
-# LangChain (Optional - can be removed if not used)
-langchain==0.1.0
-openai==1.6.1
+# AI/ML Libraries (Updated for Python 3.12)
+torch>=2.2.0
+transformers>=4.36.0
 
 # Utilities
 numpy==1.26.3
