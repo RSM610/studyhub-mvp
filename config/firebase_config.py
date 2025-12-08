@@ -6,20 +6,21 @@ def initialize_firebase():
     """Initialize Firebase with service account credentials"""
     if not firebase_admin._apps:
         cred = credentials.Certificate({
-            "type": st.secrets["FIREBASE_TYPE"],
-            "project_id": st.secrets["FIREBASE_PROJECT_ID"],
-            "private_key_id": st.secrets["FIREBASE_PRIVATE_KEY_ID"],
-            "private_key": st.secrets["FIREBASE_PRIVATE_KEY"].replace('\\n', '\n'),
-            "client_email": st.secrets["FIREBASE_CLIENT_EMAIL"],
-            "client_id": st.secrets["FIREBASE_CLIENT_ID"],
-            "auth_uri": st.secrets["FIREBASE_AUTH_URI"],
-            "token_uri": st.secrets["FIREBASE_TOKEN_URI"],
-            "auth_provider_x509_cert_url": st.secrets["FIREBASE_AUTH_PROVIDER_CERT_URL"],
-            "client_x509_cert_url": st.secrets["FIREBASE_CLIENT_CERT_URL"],
-            "universe_domain": st.secrets.get("FIREBASE_UNIVERSE_DOMAIN", "googleapis.com")
+            "type": st.secrets["firebase"]["type"],
+            "project_id": st.secrets["firebase"]["project_id"],
+            "private_key_id": st.secrets["firebase"]["private_key_id"],
+            "private_key": st.secrets["firebase"]["private_key"],
+            "client_email": st.secrets["firebase"]["client_email"],
+            "client_id": st.secrets["firebase"]["client_id"],
+            "auth_uri": st.secrets["firebase"]["auth_uri"],
+            "token_uri": st.secrets["firebase"]["token_uri"],
+            "auth_provider_x509_cert_url": st.secrets["firebase"]["auth_provider_x509_cert_url"],
+            "client_x509_cert_url": st.secrets["firebase"]["client_x509_cert_url"],
         })
         
-        firebase_admin.initialize_app(cred)
+        firebase_admin.initialize_app(cred, {
+            'storageBucket': st.secrets["firebase"]["storage_bucket"].replace("gs://", "")
+        })
     
     return firestore.client()
 
