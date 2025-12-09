@@ -6,20 +6,21 @@ from config.firebase_config import db
 from firebase_admin import storage
 
 def render_chat():
-    """Render AI chat interface with REAL RAG functionality and downloads"""
+    """Render AI chat interface with REAL RAG functionality and downloads - USER ISOLATED"""
     subject = st.session_state.selected_subject
     
-    # Generate unique key for this subject's chat history
-    subject_key = f"{subject['name']}_{subject.get('category', 'General')}".replace(' ', '_')
+    # USER-SPECIFIC chat key - prevents cross-user chat leakage
+    user_id = st.session_state.user['id']
+    subject_key = f"{user_id}_{subject['name']}_{subject.get('category', 'General')}".replace(' ', '_')
     
-    # Initialize subject-specific chat history
+    # Initialize USER-SPECIFIC chat history
     if 'chat_histories' not in st.session_state:
         st.session_state.chat_histories = {}
     
     if subject_key not in st.session_state.chat_histories:
         st.session_state.chat_histories[subject_key] = []
     
-    # Use subject-specific messages
+    # Use USER-SPECIFIC messages
     messages = st.session_state.chat_histories[subject_key]
     
     st.markdown("""
@@ -33,6 +34,7 @@ def render_chat():
             margin-left: auto;
             max-width: 70%;
             box-shadow: 0 4px 10px rgba(167, 139, 250, 0.3);
+            word-wrap: break-word;
         }
         .ai-message {
             background: linear-gradient(135deg, #fef3c7 0%, #fce7f3 100%);
@@ -44,6 +46,8 @@ def render_chat():
             max-width: 70%;
             border: 2px solid #fbcfe8;
             box-shadow: 0 4px 10px rgba(236, 72, 153, 0.2);
+            white-space: pre-wrap;
+            word-wrap: break-word;
         }
         .download-btn {
             background: linear-gradient(135deg, #10b981 0%, #059669 100%);
@@ -62,17 +66,21 @@ def render_chat():
         </style>
     """, unsafe_allow_html=True)
     
-    col1, col2 = st.columns([1, 5])
+    col1, col2, col3 = st.columns([1, 1, 4])
     
     with col1:
-        if st.button("← Back", key="back_btn"):
+        if st.button("← Back", key="back_btn", use_container_width=True):
             st.session_state.selected_subject = None
             st.rerun()
     
     with col2:
-        if st.button("🗑️ Clear Chat", key="clear_chat_btn"):
+        if st.button("🗑️ Clear", key="clear_chat_btn", use_container_width=True):
+            # FIXED: Actually clear the chat
             st.session_state.chat_histories[subject_key] = []
-            st.success("Chat history cleared!")
+            st.success("Chat cleared!")
+            # Force immediate rerun
+            import time
+            time.sleep(0.5)
             st.rerun()
     
     st.title(f"{subject['icon']} {subject['name']}")
@@ -101,7 +109,7 @@ def render_chat():
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        if st.button("📚 List Resources", use_container_width=True):
+        if st.button("📚 List Resources", use_container_width=True, key="btn_list"):
             if len(subject_files) == 0:
                 response = f"📭 No resources uploaded yet for {subject['name']}."
             else:
@@ -113,13 +121,13 @@ def render_chat():
             st.rerun()
     
     with col2:
-        if st.button("📝 Get Summaries", use_container_width=True):
+        if st.button("📝 Summaries", use_container_width=True, key="btn_summary"):
             if len(subject_files) == 0:
                 response = "📭 No files to summarize yet."
             else:
-                with st.spinner("Generating summaries from Qdrant..."):
+                with st.spinner("Generating summaries..."):
                     response = f"📝 **Document Summaries:**\n\n"
-                    for idx, (doc_id, file_data) in enumerate(subject_files, 1):
+                    for idx, (doc_id, file_data) in enumerate(subject_files[:3], 1):  # Limit to 3
                         file_name = file_data.get('file_name', 'Unknown')
                         summary = QdrantRAG.get_document_summary(file_name, subject_full_name)
                         response += f"**{idx}. {file_name}**\n{summary}\n\n"
@@ -128,27 +136,25 @@ def render_chat():
             st.rerun()
     
     with col3:
-        if st.button("🔍 Search All", use_container_width=True):
+        if st.button("🔍 Search", use_container_width=True, key="btn_search"):
             response = f"🔍 **Ready to search {len(subject_files)} documents!**\n\n"
-            response += "Type any question and I'll search through all uploaded materials using RAG.\n\n"
-            response += "Examples:\n"
-            response += "• 'What are the key concepts?'\n"
-            response += "• 'Explain [topic]'\n"
-            response += "• 'Summarize the main points'"
+            response += "Type any question and I'll search through all uploaded materials.\n\n"
+            response += "**Examples:**\n"
+            response += "• What are the key concepts?\n"
+            response += "• Explain [topic]\n"
+            response += "• Summarize the main points"
             
             st.session_state.chat_histories[subject_key].append({'role': 'assistant', 'content': response})
             st.rerun()
     
     with col4:
-        if st.button("💡 Topics", use_container_width=True):
-            if len(subject_files) == 0:
-                response = "📭 No documents to analyze yet."
-            else:
-                response = f"💡 **Analyzing {len(subject_files)} documents...**\n\n"
-                response += "Available documents:\n"
-                for idx, (doc_id, file_data) in enumerate(subject_files, 1):
-                    response += f"• {file_data.get('file_name', 'Unknown')}\n"
-                response += "\nAsk me about any topic and I'll search through these materials!"
+        if st.button("💡 Help", use_container_width=True, key="btn_help"):
+            response = "💡 **How to Use:**\n\n"
+            response += "📚 **List Resources** - View all materials\n"
+            response += "📝 **Summaries** - Get document overviews\n"
+            response += "🔍 **Search** - AI-powered search tips\n"
+            response += "💬 **Chat** - Ask questions naturally\n\n"
+            response += "Type your question below and I'll search through the documents!"
             
             st.session_state.chat_histories[subject_key].append({'role': 'assistant', 'content': response})
             st.rerun()
@@ -171,25 +177,20 @@ def render_chat():
                     download_url = file_data.get('download_url')
                     
                     if download_url:
-                        # Direct download link
                         st.markdown(f'<a href="{download_url}" class="download-btn" download>⬇️ Download</a>', unsafe_allow_html=True)
                     else:
-                        # Try to get download URL from storage
                         storage_path = file_data.get('storage_path')
                         if storage_path:
                             try:
                                 bucket = storage.bucket()
                                 blob = bucket.blob(storage_path)
-                                
-                                # Generate signed URL (valid for 1 hour)
                                 from datetime import timedelta
                                 signed_url = blob.generate_signed_url(timedelta(hours=1))
-                                
                                 st.markdown(f'<a href="{signed_url}" class="download-btn" download>⬇️ Download</a>', unsafe_allow_html=True)
                             except Exception as e:
-                                st.caption("❌ Download unavailable")
+                                st.caption("❌ Error")
                         else:
-                            st.caption("⏳ Processing...")
+                            st.caption("⏳ Processing")
                 
                 st.divider()
     
@@ -199,25 +200,25 @@ def render_chat():
     col_lang, col_count = st.columns([2, 3])
     with col_lang:
         language = st.selectbox(
-            "🌍 Explain in:",
-            ["English", "Urdu", "Arabic", "Spanish", "French", "German", "Chinese", "Japanese"],
-            key=f"language_select_{subject_key}"
+            "🌍 Language:",
+            ["English", "Urdu", "Arabic", "Spanish", "French"],
+            key=f"language_{subject_key}"
         )
     
     with col_count:
-        st.caption(f"💬 {len(messages)} messages in this chat")
+        st.caption(f"💬 {len(messages)} messages • 🔒 Private to you")
     
     # Messages display
     if len(messages) == 0:
         st.markdown(f"""
             <div style="text-align: center; padding: 60px 20px; color: #c084fc;">
                 <div style="font-size: 4rem; margin-bottom: 20px;">🤖</div>
-                <p style="font-size: 1.3rem; font-weight: 600;">RAG-Powered AI Ready!</p>
-                <p style="font-size: 1rem;">Ask me anything about {subject['name']} and I'll search through uploaded materials~</p>
+                <p style="font-size: 1.3rem; font-weight: 600;">AI Assistant Ready!</p>
+                <p style="font-size: 1rem;">Ask me anything about {subject['name']}</p>
             </div>
         """, unsafe_allow_html=True)
     else:
-        for msg in messages:
+        for idx, msg in enumerate(messages):
             if msg['role'] == 'user':
                 st.markdown(f'<div class="user-message">{msg["content"]}</div>', unsafe_allow_html=True)
             else:
@@ -233,17 +234,17 @@ def render_chat():
             "Message",
             placeholder=f"Ask about {subject['name']}...",
             label_visibility="collapsed",
-            key=f"chat_input_{subject_key}"
+            key=f"input_{subject_key}"
         )
     
     with col2:
-        send_btn = st.button("Send ✨", use_container_width=True, type="primary")
+        send_btn = st.button("Send", use_container_width=True, type="primary", key="btn_send")
     
     if send_btn and prompt:
-        # Add user message to THIS subject's history
+        # Add user message
         st.session_state.chat_histories[subject_key].append({'role': 'user', 'content': prompt})
         
-        user_id = st.session_state.user['id']
+        # Log interaction
         FirebaseOps.log_interaction(user_id, 'message_sent', {
             'subject': subject['name'],
             'message': prompt,
@@ -251,14 +252,14 @@ def render_chat():
         })
         MetricsTracker.track_message()
         
-        # REAL RAG RESPONSE
-        with st.spinner("🔍 Searching through documents..."):
+        # Generate response
+        with st.spinner("🔍 Searching documents..."):
             ai_response = QdrantRAG.generate_rag_response(
                 query=prompt,
                 subject=subject_full_name,
                 language=language
             )
         
-        # Add AI response to THIS subject's history
+        # Add AI response
         st.session_state.chat_histories[subject_key].append({'role': 'assistant', 'content': ai_response})
         st.rerun()

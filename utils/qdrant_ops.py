@@ -217,34 +217,60 @@ class QdrantRAG:
     @staticmethod
     def generate_rag_response(query, subject, language="English"):
         """
-        Generate RAG response using FREE local model or simple context retrieval
+        Generate RAG response - Returns FULL READABLE TEXT, not word lists
         """
         try:
             # Search for relevant documents
             documents = QdrantRAG.search_documents(query, subject, limit=5)
             
             if not documents:
-                return f"❌ I couldn't find relevant information about '{query}' in the uploaded {subject} materials.\n\n💡 Try:\n- Uploading notes or past papers\n- Asking about topics covered in uploaded files\n- Using different keywords"
+                return (
+                    f"❌ I couldn't find relevant information about '{query}' in the {subject} materials.\n\n"
+                    f"💡 **Suggestions:**\n"
+                    f"• Make sure documents are uploaded and approved\n"
+                    f"• Try different keywords or phrasing\n"
+                    f"• Ask about topics covered in the uploaded files"
+                )
             
-            # Build context from retrieved documents
-            context = "\n\n".join([
-                f"📄 From {doc['file_name']} (relevance: {doc['score']:.2f}):\n{doc['text'][:500]}..."
-                for doc in documents
-            ])
+            # Build readable response with FULL SENTENCES
+            response = f"📚 **Search Results for: '{query}'**\n\n"
+            response += f"Found {len(documents)} relevant sections in your {subject} materials.\n\n"
+            response += "---\n\n"
             
-            # Simple response without LLM (FREE version)
-            response = f"📚 **Found {len(documents)} relevant sections in your {subject} materials:**\n\n"
-            response += context
-            response += f"\n\n💡 **Summary:** Based on the uploaded materials, the information above is most relevant to your question: '{query}'\n\n"
+            # Show each document excerpt with context
+            for idx, doc in enumerate(documents, 1):
+                response += f"**#{idx} - From: {doc['file_name']}** (Relevance: {doc['score']:.1%})\n\n"
+                
+                # Clean and format the text properly
+                text = doc['text'].strip()
+                
+                # Limit to first 400 characters for readability
+                if len(text) > 400:
+                    text = text[:400] + "..."
+                
+                response += f"{text}\n\n"
+                response += "---\n\n"
+            
+            # Add summary
+            response += "💡 **Summary:**\n"
+            response += f"The information above is the most relevant content I found about '{query}' "
+            response += f"in your {subject} materials. The excerpts are ranked by relevance.\n\n"
             
             if language != "English":
-                response += f"🌍 **Language Note:** Full AI-generated responses in {language} require an LLM API (OpenAI/Anthropic). Currently showing raw document excerpts."
+                response += f"\n🌍 **Note:** Full AI translation to {language} requires an LLM API. "
+                response += "Currently showing English excerpts from your documents."
             
             return response
             
         except Exception as e:
             st.error(f"Error generating response: {e}")
-            return f"❌ Error: {str(e)}\n\nPlease check your Qdrant connection."
+            return (
+                f"❌ **Error:** {str(e)}\n\n"
+                f"Please check:\n"
+                f"• Qdrant connection is working\n"
+                f"• Documents are properly uploaded\n"
+                f"• Collection exists for {subject}"
+            )
     
     @staticmethod
     def get_document_summary(file_name, subject):
@@ -285,7 +311,11 @@ class QdrantRAG:
             ]
             
             if not matching_chunks:
-                return f"No chunks found for '{file_name}' in this collection.\n\nAvailable files: {', '.join(set(p.payload.get('file_name', 'Unknown') for p in results[0][:10]))}"
+                available_files = list(set(p.payload.get('file_name', 'Unknown') for p in results[0][:10]))
+                return (
+                    f"No chunks found for '{file_name}' in this collection.\n\n"
+                    f"Available files: {', '.join(available_files[:5])}"
+                )
             
             # Sort by chunk_index to get them in order
             matching_chunks.sort(key=lambda x: x.payload.get("chunk_index", 0))
@@ -294,30 +324,15 @@ class QdrantRAG:
             chunks = [point.payload.get("text", "") for point in matching_chunks[:3]]
             summary = "\n\n".join(chunks)
             
-            return f"📄 **{file_name}**\n\n{summary[:1000]}...\n\n💡 Contains {len(matching_chunks)} sections total."
+            # Limit length
+            if len(summary) > 1000:
+                summary = summary[:1000] + "..."
+            
+            return (
+                f"📄 **{file_name}**\n\n"
+                f"{summary}\n\n"
+                f"💡 This document contains {len(matching_chunks)} indexed sections."
+            )
             
         except Exception as e:
             return f"Error getting summary: {str(e)}"
-    
-    @staticmethod
-    def create_collections_for_existing_subjects():
-        """Create Qdrant collections for all existing subjects in Firebase"""
-        try:
-            from config.firebase_config import db
-            
-            subjects = list(db.collection('subjects').stream())
-            created = []
-            
-            for doc in subjects:
-                subject_data = doc.to_dict()
-                subject_name = f"{subject_data.get('name', '')} ({subject_data.get('category', '')})"
-                collection_name = f"subject_{subject_name.lower().replace(' ', '_').replace('+', '').replace('(', '').replace(')', '')}"
-                
-                if QdrantRAG.create_collection_if_not_exists(collection_name):
-                    created.append(subject_name)
-            
-            return created
-            
-        except Exception as e:
-            st.error(f"Error creating collections: {e}")
-            return []

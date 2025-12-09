@@ -7,7 +7,7 @@ from firebase_admin import storage
 import io
 
 def render_dashboard():
-    """Render cute main dashboard with subject selection"""
+    """Render cute main dashboard with subject selection - FIXED resource counting"""
     
     # Get subjects from Firebase (dynamic)
     try:
@@ -73,24 +73,29 @@ def render_dashboard():
     st.title("✨ Your Study Space ✨")
     st.write("Pick a subject and start your learning journey~")
     
-    # Get real resource counts from Firebase
+    # Get real resource counts from Firebase - FIXED EXACT MATCHING
     try:
         all_files = list(db.collection('uploaded_files').stream())
         verified_files = [doc for doc in all_files if doc.to_dict().get('verified', False)]
         
-        # Count resources per subject
+        # Count resources per EXACT subject match
         subject_counts = {}
         for doc in verified_files:
-            subject_name = doc.to_dict().get('subject', '')
-            subject_counts[subject_name] = subject_counts.get(subject_name, 0) + 1
+            # Get the EXACT subject string stored in Firebase
+            subject_string = doc.to_dict().get('subject', '')
+            subject_counts[subject_string] = subject_counts.get(subject_string, 0) + 1
         
-        # Update subjects with real counts
+        # Debug: Show what's stored
+        st.caption(f"Debug - Subjects in DB: {list(subject_counts.keys())}")
+        
+        # Update subjects with EXACT matches only
         for subject in subjects:
-            matching_count = 0
-            for stored_subject, count in subject_counts.items():
-                if subject['name'] in stored_subject or subject['category'] in stored_subject:
-                    matching_count += count
-            subject['resources'] = matching_count
+            # Build the EXACT subject string as stored during upload
+            subject_full_name = f"{subject['name']} ({subject.get('category', 'General')})"
+            
+            # Count only EXACT matches
+            subject['resources'] = subject_counts.get(subject_full_name, 0)
+            
     except Exception as e:
         st.error(f"Error loading resource counts: {e}")
         for subject in subjects:
@@ -157,12 +162,12 @@ def render_dashboard():
                             blob.make_public()
                             download_url = blob.public_url
                             
-                            # Save metadata to Firestore
+                            # Save metadata to Firestore with EXACT subject string
                             result = FirebaseOps.save_uploaded_file(
                                 user_id,
                                 file.name,
                                 file_bytes,
-                                upload_subject
+                                upload_subject  # This is already "Name (Category)" format
                             )
                             
                             if result:
