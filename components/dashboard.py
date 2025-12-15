@@ -3,11 +3,9 @@ from utils.firebase_ops import FirebaseOps
 from utils.metrics import MetricsTracker
 from utils.qdrant_ops import QdrantRAG
 from config.firebase_config import db
-from firebase_admin import storage
-import io
 
 def render_dashboard():
-    """Render cute main dashboard with subject selection - FIXED resource counting"""
+    """Render cute main dashboard with subject selection"""
     
     # Get subjects from Firebase (dynamic)
     try:
@@ -73,29 +71,24 @@ def render_dashboard():
     st.title("✨ Your Study Space ✨")
     st.write("Pick a subject and start your learning journey~")
     
-    # Get real resource counts from Firebase - FIXED EXACT MATCHING
+    # Get real resource counts from Firebase
     try:
         all_files = list(db.collection('uploaded_files').stream())
         verified_files = [doc for doc in all_files if doc.to_dict().get('verified', False)]
         
-        # Count resources per EXACT subject match
+        # Count resources per subject
         subject_counts = {}
         for doc in verified_files:
-            # Get the EXACT subject string stored in Firebase
-            subject_string = doc.to_dict().get('subject', '')
-            subject_counts[subject_string] = subject_counts.get(subject_string, 0) + 1
+            subject_name = doc.to_dict().get('subject', '')
+            subject_counts[subject_name] = subject_counts.get(subject_name, 0) + 1
         
-        # Debug: Show what's stored
-        st.caption(f"Debug - Subjects in DB: {list(subject_counts.keys())}")
-        
-        # Update subjects with EXACT matches only
+        # Update subjects with real counts
         for subject in subjects:
-            # Build the EXACT subject string as stored during upload
-            subject_full_name = f"{subject['name']} ({subject.get('category', 'General')})"
-            
-            # Count only EXACT matches
-            subject['resources'] = subject_counts.get(subject_full_name, 0)
-            
+            matching_count = 0
+            for stored_subject, count in subject_counts.items():
+                if subject['name'] in stored_subject or subject['category'] in stored_subject:
+                    matching_count += count
+            subject['resources'] = matching_count
     except Exception as e:
         st.error(f"Error loading resource counts: {e}")
         for subject in subjects:
@@ -144,40 +137,24 @@ def render_dashboard():
         
         if st.button("✨ Upload Files", type="primary", use_container_width=True, key="upload_btn"):
             try:
-                with st.spinner("Uploading files to Firebase Storage and Qdrant..."):
+                with st.spinner("Uploading files to Firebase and Qdrant..."):
                     user_id = st.session_state.user['id']
-                    bucket = storage.bucket()
                     
                     success_count = 0
                     for file in uploaded_files:
                         try:
                             file_bytes = file.getvalue()
                             
-                            # Upload to Firebase Storage
-                            storage_path = f"uploads/{user_id}/{upload_subject}/{file.name}"
-                            blob = bucket.blob(storage_path)
-                            blob.upload_from_string(file_bytes, content_type=file.type)
-                            
-                            # Make file publicly accessible (or use signed URLs later)
-                            blob.make_public()
-                            download_url = blob.public_url
-                            
-                            # Save metadata to Firestore with EXACT subject string
+                            # Save to Firebase
                             result = FirebaseOps.save_uploaded_file(
                                 user_id,
                                 file.name,
                                 file_bytes,
-                                upload_subject  # This is already "Name (Category)" format
+                                upload_subject
                             )
                             
                             if result:
                                 doc_id = result[1].id
-                                
-                                # Update with storage URL
-                                db.collection('uploaded_files').document(doc_id).update({
-                                    'storage_path': storage_path,
-                                    'download_url': download_url
-                                })
                                 
                                 # Upload to Qdrant for RAG
                                 with st.spinner(f"Processing {file.name} for AI search..."):
@@ -199,9 +176,9 @@ def render_dashboard():
                             st.error(f"Failed to upload {file.name}: {str(file_error)}")
                     
                     if success_count > 0:
-                        st.success(f"✨ Successfully uploaded {success_count}/{len(uploaded_files)} files to Firebase Storage!")
+                        st.success(f"✨ Successfully uploaded {success_count}/{len(uploaded_files)} files!")
                         st.balloons()
-                        st.info("⏳ Your files are pending admin approval. Once verified, they'll be downloadable and searchable by AI!")
+                        st.info("⏳ Your files are pending admin approval. Once verified, they'll be searchable by AI!")
                     else:
                         st.error("❌ No files were uploaded successfully. Please try again.")
                         
