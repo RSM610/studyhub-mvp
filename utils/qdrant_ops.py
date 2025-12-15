@@ -1,6 +1,6 @@
 import streamlit as st
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct, PayloadSchemaType, PayloadIndexParams
+from qdrant_client.models import Distance, VectorParams, PointStruct, PayloadSchemaType
 from sentence_transformers import SentenceTransformer
 import hashlib
 from datetime import datetime
