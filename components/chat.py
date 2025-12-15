@@ -3,85 +3,72 @@ from utils.firebase_ops import FirebaseOps
 from utils.metrics import MetricsTracker
 from utils.qdrant_ops import QdrantRAG
 from config.firebase_config import db
-from firebase_admin import storage
 
 def render_chat():
-    """Render AI chat interface with REAL RAG functionality and downloads - USER ISOLATED"""
+    """Render AI chat interface with REAL RAG functionality"""
     subject = st.session_state.selected_subject
-    
-    # USER-SPECIFIC chat key - prevents cross-user chat leakage
-    user_id = st.session_state.user['id']
-    subject_key = f"{user_id}_{subject['name']}_{subject.get('category', 'General')}".replace(' ', '_')
-    
-    # Initialize USER-SPECIFIC chat history
-    if 'chat_histories' not in st.session_state:
-        st.session_state.chat_histories = {}
-    
-    if subject_key not in st.session_state.chat_histories:
-        st.session_state.chat_histories[subject_key] = []
-    
-    # Use USER-SPECIFIC messages
-    messages = st.session_state.chat_histories[subject_key]
     
     st.markdown("""
         <style>
+        .chat-messages {
+            max-height: 500px;
+            overflow-y: auto;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
         .user-message {
             background: linear-gradient(135deg, #a78bfa 0%, #ec4899 100%);
             color: white;
             padding: 15px 20px;
             border-radius: 20px 20px 5px 20px;
-            margin: 10px 0;
-            margin-left: auto;
+            margin: 10px 0 10px auto;
             max-width: 70%;
             box-shadow: 0 4px 10px rgba(167, 139, 250, 0.3);
-            word-wrap: break-word;
+            float: right;
+            clear: both;
         }
         .ai-message {
-            background: linear-gradient(135deg, #fef3c7 0%, #fce7f3 100%);
-            color: #7c3aed;
-            padding: 15px 20px;
+            background: white;
+            color: #1f2937;
+            padding: 20px;
             border-radius: 20px 20px 20px 5px;
-            margin: 10px 0;
-            margin-right: auto;
-            max-width: 70%;
-            border: 2px solid #fbcfe8;
-            box-shadow: 0 4px 10px rgba(236, 72, 153, 0.2);
-            white-space: pre-wrap;
-            word-wrap: break-word;
+            margin: 10px auto 10px 0;
+            max-width: 85%;
+            border: 2px solid #e9d5ff;
+            box-shadow: 0 4px 10px rgba(167, 139, 250, 0.2);
+            float: left;
+            clear: both;
         }
-        .download-btn {
-            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-            color: white;
-            padding: 8px 16px;
-            border-radius: 10px;
-            text-decoration: none;
+        .ai-message h4 {
+            color: #7c3aed;
+            margin-top: 0;
+            margin-bottom: 10px;
+        }
+        .ai-message p {
+            margin: 8px 0;
+            line-height: 1.6;
+        }
+        .source-badge {
             display: inline-block;
-            font-weight: 600;
-            transition: all 0.3s ease;
+            background: #fef3c7;
+            color: #7c3aed;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 0.85rem;
+            margin: 5px 5px 5px 0;
+            border: 1px solid #fde68a;
         }
-        .download-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
+        .relevance-score {
+            color: #059669;
+            font-weight: 600;
+            font-size: 0.9rem;
         }
         </style>
     """, unsafe_allow_html=True)
     
-    col1, col2, col3 = st.columns([1, 1, 4])
-    
-    with col1:
-        if st.button("← Back", key="back_btn", use_container_width=True):
-            st.session_state.selected_subject = None
-            st.rerun()
-    
-    with col2:
-        if st.button("🗑️ Clear", key="clear_chat_btn", use_container_width=True):
-            # FIXED: Actually clear the chat
-            st.session_state.chat_histories[subject_key] = []
-            st.success("Chat cleared!")
-            # Force immediate rerun
-            import time
-            time.sleep(0.5)
-            st.rerun()
+    if st.button("← Back to subjects", key="back_btn"):
+        st.session_state.selected_subject = None
+        st.rerun()
     
     st.title(f"{subject['icon']} {subject['name']}")
     st.write(f"**{subject.get('category', 'General')}**")
@@ -109,124 +96,146 @@ def render_chat():
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        if st.button("📚 List Resources", use_container_width=True, key="btn_list"):
+        if st.button("📚 List Resources", use_container_width=True):
             if len(subject_files) == 0:
-                response = f"📭 No resources uploaded yet for {subject['name']}."
+                response = f"📭 **No resources uploaded yet for {subject['name']}.**\n\nUpload some materials from the dashboard to get started!"
             else:
                 response = f"📚 **{len(subject_files)} Resources Available:**\n\n"
                 for idx, (doc_id, file_data) in enumerate(subject_files, 1):
-                    response += f"{idx}. 📄 {file_data.get('file_name', 'Unknown')}\n"
+                    file_size = file_data.get('file_size', 0) / 1024
+                    response += f"**{idx}. {file_data.get('file_name', 'Unknown')}**\n"
+                    response += f"   └─ Size: {file_size:.1f} KB\n\n"
             
-            st.session_state.chat_histories[subject_key].append({'role': 'assistant', 'content': response})
+            if 'messages' not in st.session_state:
+                st.session_state.messages = []
+            st.session_state.messages.append({'role': 'assistant', 'content': response})
             st.rerun()
     
     with col2:
-        if st.button("📝 Summaries", use_container_width=True, key="btn_summary"):
+        if st.button("📝 Get Summaries", use_container_width=True):
             if len(subject_files) == 0:
-                response = "📭 No files to summarize yet."
+                response = "📭 **No files to summarize yet.**\n\nUpload some study materials first!"
             else:
-                with st.spinner("Generating summaries..."):
-                    response = f"📝 **Document Summaries:**\n\n"
-                    for idx, (doc_id, file_data) in enumerate(subject_files[:3], 1):  # Limit to 3
+                with st.spinner("📖 Generating intelligent summaries from Qdrant..."):
+                    response = f"📝 **Document Summaries for {subject['name']}:**\n\n"
+                    
+                    for idx, (doc_id, file_data) in enumerate(subject_files[:5], 1):  # Limit to 5
                         file_name = file_data.get('file_name', 'Unknown')
+                        response += f"### {idx}. {file_name}\n\n"
+                        
+                        # Get actual summary from Qdrant
                         summary = QdrantRAG.get_document_summary(file_name, subject_full_name)
-                        response += f"**{idx}. {file_name}**\n{summary}\n\n"
+                        
+                        if summary and len(summary) > 50:
+                            response += f"{summary}\n\n"
+                        else:
+                            response += f"*Summary not available. File may still be processing.*\n\n"
+                        
+                        response += "---\n\n"
+                    
+                    if len(subject_files) > 5:
+                        response += f"\n*Showing 5 of {len(subject_files)} documents. Ask specific questions to search all materials.*"
             
-            st.session_state.chat_histories[subject_key].append({'role': 'assistant', 'content': response})
+            if 'messages' not in st.session_state:
+                st.session_state.messages = []
+            st.session_state.messages.append({'role': 'assistant', 'content': response})
             st.rerun()
     
     with col3:
-        if st.button("🔍 Search", use_container_width=True, key="btn_search"):
-            response = f"🔍 **Ready to search {len(subject_files)} documents!**\n\n"
-            response += "Type any question and I'll search through all uploaded materials.\n\n"
-            response += "**Examples:**\n"
-            response += "• What are the key concepts?\n"
-            response += "• Explain [topic]\n"
-            response += "• Summarize the main points"
+        if st.button("🔍 Search All", use_container_width=True):
+            response = f"🔍 **AI Search Ready for {len(subject_files)} documents!**\n\n"
             
-            st.session_state.chat_histories[subject_key].append({'role': 'assistant', 'content': response})
+            if len(subject_files) > 0:
+                response += "I'll search through:\n"
+                for idx, (doc_id, file_data) in enumerate(subject_files, 1):
+                    response += f"• {file_data.get('file_name', 'Unknown')}\n"
+                response += "\n**Example questions:**\n"
+                response += "• 'What are the key concepts in chapter 3?'\n"
+                response += "• 'Explain Newton's laws'\n"
+                response += "• 'Summarize the business models discussed'\n"
+                response += "• 'What formulas are mentioned?'"
+            else:
+                response += "No documents uploaded yet. Upload materials to enable AI search!"
+            
+            if 'messages' not in st.session_state:
+                st.session_state.messages = []
+            st.session_state.messages.append({'role': 'assistant', 'content': response})
             st.rerun()
     
     with col4:
-        if st.button("💡 Help", use_container_width=True, key="btn_help"):
-            response = "💡 **How to Use:**\n\n"
-            response += "📚 **List Resources** - View all materials\n"
-            response += "📝 **Summaries** - Get document overviews\n"
-            response += "🔍 **Search** - AI-powered search tips\n"
-            response += "💬 **Chat** - Ask questions naturally\n\n"
-            response += "Type your question below and I'll search through the documents!"
+        if st.button("💡 Topics", use_container_width=True):
+            if len(subject_files) == 0:
+                response = "📭 **No documents to analyze yet.**\n\nUpload study materials to discover topics!"
+            else:
+                response = f"💡 **Available Materials Analysis:**\n\n"
+                response += f"I have access to **{len(subject_files)} documents** covering {subject['name']}.\n\n"
+                response += "**Documents:**\n"
+                for idx, (doc_id, file_data) in enumerate(subject_files, 1):
+                    response += f"{idx}. {file_data.get('file_name', 'Unknown')}\n"
+                
+                response += "\n**Ask me anything like:**\n"
+                response += "• 'What topics are covered?'\n"
+                response += "• 'Find information about [specific topic]'\n"
+                response += "• 'What are the main themes?'\n"
+                response += "\nI'll search through all materials using RAG!"
             
-            st.session_state.chat_histories[subject_key].append({'role': 'assistant', 'content': response})
+            if 'messages' not in st.session_state:
+                st.session_state.messages = []
+            st.session_state.messages.append({'role': 'assistant', 'content': response})
             st.rerun()
     
     st.markdown("---")
     
-    # Show resources with DOWNLOAD functionality
-    with st.expander(f"📚 View & Download {len(subject_files)} Resources", expanded=False):
+    # Show resources in expandable
+    with st.expander(f"📚 View {len(subject_files)} Resources", expanded=False):
         if len(subject_files) == 0:
             st.info(f"No resources yet. Upload some materials to get started!")
         else:
             for doc_id, file_data in subject_files:
                 col1, col2 = st.columns([3, 1])
-                
                 with col1:
                     st.write(f"📄 **{file_data.get('file_name', 'Unknown')}**")
                     st.caption(f"Size: {file_data.get('file_size', 0) / 1024:.1f} KB")
-                
                 with col2:
-                    download_url = file_data.get('download_url')
-                    
-                    if download_url:
-                        st.markdown(f'<a href="{download_url}" class="download-btn" download>⬇️ Download</a>', unsafe_allow_html=True)
-                    else:
-                        storage_path = file_data.get('storage_path')
-                        if storage_path:
-                            try:
-                                bucket = storage.bucket()
-                                blob = bucket.blob(storage_path)
-                                from datetime import timedelta
-                                signed_url = blob.generate_signed_url(timedelta(hours=1))
-                                st.markdown(f'<a href="{signed_url}" class="download-btn" download>⬇️ Download</a>', unsafe_allow_html=True)
-                            except Exception as e:
-                                st.caption("❌ Error")
-                        else:
-                            st.caption("⏳ Processing")
-                
-                st.divider()
+                    if st.button("📊 Info", key=f"info_{doc_id}"):
+                        st.info("✨ This file is searchable by AI")
     
     st.markdown("---")
     
     # Language selector
-    col_lang, col_count = st.columns([2, 3])
+    col_lang, _ = st.columns([2, 3])
     with col_lang:
         language = st.selectbox(
-            "🌍 Language:",
-            ["English", "Urdu", "Arabic", "Spanish", "French"],
-            key=f"language_{subject_key}"
+            "🌍 Explain in:",
+            ["English", "Urdu", "Arabic", "Spanish", "French", "German", "Chinese", "Japanese"],
+            key="language_select"
         )
     
-    with col_count:
-        st.caption(f"💬 {len(messages)} messages • 🔒 Private to you")
+    if 'messages' not in st.session_state:
+        st.session_state.messages = []
     
-    # Messages display
-    if len(messages) == 0:
+    # Messages container
+    st.markdown('<div class="chat-messages">', unsafe_allow_html=True)
+    
+    if len(st.session_state.messages) == 0:
         st.markdown(f"""
             <div style="text-align: center; padding: 60px 20px; color: #c084fc;">
                 <div style="font-size: 4rem; margin-bottom: 20px;">🤖</div>
-                <p style="font-size: 1.3rem; font-weight: 600;">AI Assistant Ready!</p>
-                <p style="font-size: 1rem;">Ask me anything about {subject['name']}</p>
+                <p style="font-size: 1.3rem; font-weight: 600;">RAG-Powered AI Ready!</p>
+                <p style="font-size: 1rem;">Ask me anything about {subject['name']} and I'll search through uploaded materials~</p>
             </div>
         """, unsafe_allow_html=True)
     else:
-        for idx, msg in enumerate(messages):
+        for msg in st.session_state.messages:
             if msg['role'] == 'user':
                 st.markdown(f'<div class="user-message">{msg["content"]}</div>', unsafe_allow_html=True)
             else:
                 st.markdown(f'<div class="ai-message">{msg["content"]}</div>', unsafe_allow_html=True)
     
+    st.markdown('</div>', unsafe_allow_html=True)
     st.markdown("<br>", unsafe_allow_html=True)
     
-    # Input
+    # Input section
     col1, col2 = st.columns([5, 1])
     
     with col1:
@@ -234,17 +243,16 @@ def render_chat():
             "Message",
             placeholder=f"Ask about {subject['name']}...",
             label_visibility="collapsed",
-            key=f"input_{subject_key}"
+            key="chat_input"
         )
     
     with col2:
-        send_btn = st.button("Send", use_container_width=True, type="primary", key="btn_send")
+        send_btn = st.button("Send ✨", use_container_width=True, type="primary")
     
     if send_btn and prompt:
-        # Add user message
-        st.session_state.chat_histories[subject_key].append({'role': 'user', 'content': prompt})
+        st.session_state.messages.append({'role': 'user', 'content': prompt})
         
-        # Log interaction
+        user_id = st.session_state.user['id']
         FirebaseOps.log_interaction(user_id, 'message_sent', {
             'subject': subject['name'],
             'message': prompt,
@@ -252,14 +260,13 @@ def render_chat():
         })
         MetricsTracker.track_message()
         
-        # Generate response
-        with st.spinner("🔍 Searching documents..."):
+        # REAL RAG RESPONSE
+        with st.spinner("🔍 Searching through documents with AI..."):
             ai_response = QdrantRAG.generate_rag_response(
                 query=prompt,
                 subject=subject_full_name,
                 language=language
             )
         
-        # Add AI response
-        st.session_state.chat_histories[subject_key].append({'role': 'assistant', 'content': ai_response})
+        st.session_state.messages.append({'role': 'assistant', 'content': ai_response})
         st.rerun()

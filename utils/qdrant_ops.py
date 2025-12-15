@@ -22,7 +22,7 @@ class QdrantRAG:
                 api_key=st.secrets["qdrant"]["api_key"]
             )
         except Exception as e:
-            st.warning(f"⚠️ Qdrant not configured. Add credentials to secrets.toml")
+            st.warning(f"⚠️ Qdrant not configured. RAG features disabled. Add Qdrant credentials to secrets.toml")
             return None
     
     @staticmethod
@@ -52,7 +52,7 @@ class QdrantRAG:
             if not exists:
                 client.create_collection(
                     collection_name=collection_name,
-                    vectors_config=VectorParams(size=384, distance=Distance.COSINE)
+                    vectors_config=VectorParams(size=384, distance=Distance.COSINE)  # all-MiniLM-L6-v2 = 384-dim
                 )
                 return True
             return False
@@ -135,8 +135,7 @@ class QdrantRAG:
                 embedding = QdrantRAG.get_embeddings(chunk)
                 
                 if embedding:
-                    # Use integer IDs (Qdrant prefers this over strings)
-                    point_id = abs(hash(f"{doc_id}_{idx}")) % (2**31)
+                    point_id = hashlib.md5(f"{doc_id}_{idx}".encode()).hexdigest()
                     
                     points.append(
                         PointStruct(
@@ -178,14 +177,6 @@ class QdrantRAG:
             
             collection_name = f"subject_{subject.lower().replace(' ', '_').replace('+', '').replace('(', '').replace(')', '')}"
             
-            # Check if collection exists
-            try:
-                collections = client.get_collections().collections
-                if not any(col.name == collection_name for col in collections):
-                    return []
-            except:
-                return []
-            
             # Get query embedding
             query_embedding = QdrantRAG.get_embeddings(query)
             
@@ -217,64 +208,127 @@ class QdrantRAG:
     @staticmethod
     def generate_rag_response(query, subject, language="English"):
         """
-        Generate RAG response - Returns FULL READABLE TEXT, not word lists
+        Generate intelligent RAG response using LLM (OpenAI/Anthropic)
         """
         try:
             # Search for relevant documents
             documents = QdrantRAG.search_documents(query, subject, limit=5)
             
             if not documents:
-                return (
-                    f"❌ I couldn't find relevant information about '{query}' in the {subject} materials.\n\n"
-                    f"💡 **Suggestions:**\n"
-                    f"• Make sure documents are uploaded and approved\n"
-                    f"• Try different keywords or phrasing\n"
-                    f"• Ask about topics covered in the uploaded files"
+                return f"❌ **No relevant information found**\n\nI couldn't find anything about '{query}' in the uploaded {subject} materials.\n\n**Try:**\n• Uploading notes or past papers for this topic\n• Using different keywords\n• Asking about topics covered in existing files"
+            
+            # Build context from documents
+            context = "\n\n".join([
+                f"Source: {doc['file_name']}\n{doc['text']}"
+                for doc in documents
+            ])
+            
+            # === ADD YOUR LLM API HERE ===
+            # Option 1: OpenAI (Recommended - cheaper)
+            try:
+                import openai
+                openai.api_key = st.secrets.get("openai", {}).get("api_key", "")
+                
+                if openai.api_key:
+                    prompt = f"""You are a helpful study assistant. Answer the student's question using ONLY the provided context from their study materials.
+
+Question: {query}
+Subject: {subject}
+Language: {language}
+
+Context from uploaded materials:
+{context}
+
+Instructions:
+1. Answer in {language}
+2. Be clear and concise
+3. Only use information from the context
+4. If the context doesn't contain the answer, say so
+5. Cite which source you're using
+
+Answer:"""
+                    
+                    response = openai.ChatCompletion.create(
+                        model="gpt-4.o mini",  # Cheap: $0.50 per 1M tokens
+                        messages=[
+                            {"role": "system", "content": "You are a helpful study assistant."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        max_tokens=500,
+                        temperature=0.7
+                    )
+                    
+                    ai_answer = response.choices[0].message.content
+                    
+                    # Format response nicely
+                    final_response = f"🤖 **AI Answer:**\n\n{ai_answer}\n\n---\n\n"
+                    final_response += f"📚 **Sources used:**\n"
+                    for idx, doc in enumerate(documents, 1):
+                        final_response += f"{idx}. {doc['file_name']} (relevance: {doc['score']*100:.1f}%)\n"
+                    
+                    return final_response
+            except Exception as e:
+                st.warning(f"⚠️ OpenAI API not configured: {e}")
+            
+            # Option 2: Anthropic Claude (Better quality, more expensive)
+            try:
+                import anthropic
+                client = anthropic.Anthropic(api_key=st.secrets.get("anthropic", {}).get("api_key", ""))
+                
+                message = client.messages.create(
+                    model="claude-3-haiku-20240307",  # Cheapest Claude
+                    max_tokens=500,
+                    messages=[{
+                        "role": "user",
+                        "content": f"""Answer this question using ONLY the provided context.
+
+Question: {query}
+Language: {language}
+
+Context: {context}
+
+Answer clearly in {language}:"""
+                    }]
                 )
+                
+                ai_answer = message.content[0].text
+                
+                final_response = f"🤖 **AI Answer:**\n\n{ai_answer}\n\n---\n\n"
+                final_response += f"📚 **Sources used:**\n"
+                for idx, doc in enumerate(documents, 1):
+                    final_response += f"{idx}. {doc['file_name']} (relevance: {doc['score']*100:.1f}%)\n"
+                
+                return final_response
+            except Exception as e:
+                st.warning(f"⚠️ Anthropic API not configured: {e}")
             
-            # Build readable response with FULL SENTENCES
-            response = f"📚 **Search Results for: '{query}'**\n\n"
-            response += f"Found {len(documents)} relevant sections in your {subject} materials.\n\n"
-            response += "---\n\n"
+            # === FALLBACK: No LLM API configured ===
+            # Show raw excerpts (current behavior)
+            response = f"🔍 **Search Results for: '{query}'**\n\n"
+            response += f"⚠️ *No LLM API configured - showing raw excerpts*\n\n"
+            response += f"Found **{len(documents)} relevant sections**:\n\n---\n\n"
             
-            # Show each document excerpt with context
             for idx, doc in enumerate(documents, 1):
-                response += f"**#{idx} - From: {doc['file_name']}** (Relevance: {doc['score']:.1%})\n\n"
-                
-                # Clean and format the text properly
+                response += f"### 📄 Source {idx}: {doc['file_name']}\n"
+                response += f"*Relevance: {doc['score']*100:.1f}%*\n\n"
                 text = doc['text'].strip()
-                
-                # Limit to first 400 characters for readability
-                if len(text) > 400:
-                    text = text[:400] + "..."
-                
-                response += f"{text}\n\n"
-                response += "---\n\n"
+                if len(text) > 600:
+                    text = text[:600] + "..."
+                response += f"{text}\n\n---\n\n"
             
-            # Add summary
-            response += "💡 **Summary:**\n"
-            response += f"The information above is the most relevant content I found about '{query}' "
-            response += f"in your {subject} materials. The excerpts are ranked by relevance.\n\n"
-            
-            if language != "English":
-                response += f"\n🌍 **Note:** Full AI translation to {language} requires an LLM API. "
-                response += "Currently showing English excerpts from your documents."
+            response += f"\n💡 **To enable AI-generated answers:**\n"
+            response += f"Add OpenAI or Anthropic API key to `.streamlit/secrets.toml`\n\n"
+            response += f"Example:\n```toml\n[openai]\napi_key = 'sk-...'\n```"
             
             return response
             
         except Exception as e:
             st.error(f"Error generating response: {e}")
-            return (
-                f"❌ **Error:** {str(e)}\n\n"
-                f"Please check:\n"
-                f"• Qdrant connection is working\n"
-                f"• Documents are properly uploaded\n"
-                f"• Collection exists for {subject}"
-            )
+            return f"❌ **Error:** {str(e)}\n\nPlease check your Qdrant connection."
     
     @staticmethod
     def get_document_summary(file_name, subject):
-        """Get summary of a specific document - FIXED to avoid index error"""
+        """Get summary of a specific document"""
         try:
             client = QdrantRAG.get_client()
             if not client:
@@ -282,57 +336,48 @@ class QdrantRAG:
             
             collection_name = f"subject_{subject.lower().replace(' ', '_').replace('+', '').replace('(', '').replace(')', '')}"
             
-            # Check if collection exists
-            try:
-                collections = client.get_collections().collections
-                if not any(col.name == collection_name for col in collections):
-                    return f"No collection found for {subject}"
-            except:
-                return "Error checking collections"
-            
-            # Get ALL points from collection (no filter to avoid index requirement)
-            try:
-                results = client.scroll(
-                    collection_name=collection_name,
-                    limit=100,
-                    with_payload=True,
-                    with_vectors=False
-                )
-            except Exception as e:
-                return f"Error scrolling collection: {str(e)}"
-            
-            if not results or not results[0]:
-                return "No content found in collection."
-            
-            # Filter for matching file_name in Python (avoids Qdrant index requirement)
-            matching_chunks = [
-                point for point in results[0]
-                if point.payload.get("file_name") == file_name
-            ]
-            
-            if not matching_chunks:
-                available_files = list(set(p.payload.get('file_name', 'Unknown') for p in results[0][:10]))
-                return (
-                    f"No chunks found for '{file_name}' in this collection.\n\n"
-                    f"Available files: {', '.join(available_files[:5])}"
-                )
-            
-            # Sort by chunk_index to get them in order
-            matching_chunks.sort(key=lambda x: x.payload.get("chunk_index", 0))
-            
-            # Combine first few chunks as summary
-            chunks = [point.payload.get("text", "") for point in matching_chunks[:3]]
-            summary = "\n\n".join(chunks)
-            
-            # Limit length
-            if len(summary) > 1000:
-                summary = summary[:1000] + "..."
-            
-            return (
-                f"📄 **{file_name}**\n\n"
-                f"{summary}\n\n"
-                f"💡 This document contains {len(matching_chunks)} indexed sections."
+            # Get all chunks from this file
+            results = client.scroll(
+                collection_name=collection_name,
+                scroll_filter={
+                    "must": [
+                        {"key": "file_name", "match": {"value": file_name}}
+                    ]
+                },
+                limit=100
             )
             
+            if not results[0]:
+                return "No content found."
+            
+            # Combine first few chunks as summary
+            chunks = [point.payload.get("text", "") for point in results[0][:3]]
+            summary = "\n\n".join(chunks)
+            
+            return f"📄 **{file_name}**\n\n{summary[:1000]}...\n\n💡 Contains {len(results[0])} sections total."
+            
         except Exception as e:
-            return f"Error getting summary: {str(e)}"
+            return f"Error: {str(e)}"
+    
+    @staticmethod
+    def create_collections_for_existing_subjects():
+        """Create Qdrant collections for all existing subjects in Firebase"""
+        try:
+            from config.firebase_config import db
+            
+            subjects = list(db.collection('subjects').stream())
+            created = []
+            
+            for doc in subjects:
+                subject_data = doc.to_dict()
+                subject_name = f"{subject_data.get('name', '')} ({subject_data.get('category', '')})"
+                collection_name = f"subject_{subject_name.lower().replace(' ', '_').replace('+', '').replace('(', '').replace(')', '')}"
+                
+                if QdrantRAG.create_collection_if_not_exists(collection_name):
+                    created.append(subject_name)
+            
+            return created
+            
+        except Exception as e:
+            st.error(f"Error creating collections: {e}")
+            return []
