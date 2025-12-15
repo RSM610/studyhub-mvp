@@ -257,10 +257,13 @@ class QdrantRAG:
             # === ADD YOUR LLM API HERE ===
             # Option 1: OpenAI (Recommended - cheaper)
             try:
-                import openai
-                openai.api_key = st.secrets.get("openai", {}).get("api_key", "")
+                from openai import OpenAI
                 
-                if openai.api_key:
+                api_key = st.secrets.get("openai", {}).get("api_key", "")
+                
+                if api_key and api_key.startswith("sk-"):
+                    client = OpenAI(api_key=api_key)
+                    
                     prompt = f"""You are a helpful study assistant. Answer the student's question using ONLY the provided context from their study materials.
 
 Question: {query}
@@ -279,7 +282,7 @@ Instructions:
 
 Answer:"""
                     
-                    response = openai.ChatCompletion.create(
+                    response = client.chat.completions.create(
                         model="gpt-4o-mini",  # Cheap: $0.50 per 1M tokens
                         messages=[
                             {"role": "system", "content": "You are a helpful study assistant."},
@@ -299,7 +302,7 @@ Answer:"""
                     
                     return final_response
             except Exception as e:
-                st.warning(f"⚠️ OpenAI API not configured: {e}")
+                st.warning(f"⚠️ OpenAI API error: {e}")
             
             # Option 2: Anthropic Claude (Better quality, more expensive)
             try:
