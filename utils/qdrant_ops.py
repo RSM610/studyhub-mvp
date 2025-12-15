@@ -1,6 +1,6 @@
 import streamlit as st
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct
+from qdrant_client.models import Distance, VectorParams, PointStruct, PayloadSchemaType, PayloadIndexParams
 from sentence_transformers import SentenceTransformer
 import hashlib
 from datetime import datetime
@@ -40,7 +40,7 @@ class QdrantRAG:
     
     @staticmethod
     def create_collection_if_not_exists(collection_name):
-        """Create Qdrant collection if it doesn't exist"""
+        """Create Qdrant collection if it doesn't exist WITH proper payload indexes"""
         client = QdrantRAG.get_client()
         if not client:
             return False
@@ -50,10 +50,34 @@ class QdrantRAG:
             exists = any(col.name == collection_name for col in collections)
             
             if not exists:
+                # Create collection with vector config
                 client.create_collection(
                     collection_name=collection_name,
-                    vectors_config=VectorParams(size=384, distance=Distance.COSINE)  # all-MiniLM-L6-v2 = 384-dim
+                    vectors_config=VectorParams(size=384, distance=Distance.COSINE)
                 )
+                
+                # IMPORTANT: Create payload indexes for filtering
+                # This allows us to filter by file_name, subject, etc.
+                try:
+                    client.create_payload_index(
+                        collection_name=collection_name,
+                        field_name="file_name",
+                        field_schema=PayloadSchemaType.KEYWORD
+                    )
+                    client.create_payload_index(
+                        collection_name=collection_name,
+                        field_name="subject",
+                        field_schema=PayloadSchemaType.KEYWORD
+                    )
+                    client.create_payload_index(
+                        collection_name=collection_name,
+                        field_name="doc_id",
+                        field_schema=PayloadSchemaType.KEYWORD
+                    )
+                except Exception as index_error:
+                    # Indexes might already exist or not be needed
+                    st.warning(f"Could not create indexes (may already exist): {index_error}")
+                
                 return True
             return False
         except Exception as e:
@@ -108,9 +132,9 @@ class QdrantRAG:
                 st.warning("⚠️ Qdrant not configured - file saved to Firebase only")
                 return 0
             
-            collection_name = f"subject_{subject.lower().replace(' ', '_').replace('+', '').replace('(', '').replace(')', '')}"
+            collection_name = f"subject_{subject.lower().replace(' ', '_').replace('+', '').replace('(', '').replace(')', '').replace(',', '')}"
             
-            # Create collection
+            # Create collection with proper indexes
             QdrantRAG.create_collection_if_not_exists(collection_name)
             
             # Extract text
@@ -135,7 +159,8 @@ class QdrantRAG:
                 embedding = QdrantRAG.get_embeddings(chunk)
                 
                 if embedding:
-                    point_id = hashlib.md5(f"{doc_id}_{idx}".encode()).hexdigest()
+                    # Use a more unique point ID to avoid collisions
+                    point_id = hashlib.md5(f"{doc_id}_{file_name}_{idx}_{datetime.now().timestamp()}".encode()).hexdigest()
                     
                     points.append(
                         PointStruct(
@@ -175,7 +200,7 @@ class QdrantRAG:
             if not client:
                 return []
             
-            collection_name = f"subject_{subject.lower().replace(' ', '_').replace('+', '').replace('(', '').replace(')', '')}"
+            collection_name = f"subject_{subject.lower().replace(' ', '_').replace('+', '').replace('(', '').replace(')', '').replace(',', '')}"
             
             # Get query embedding
             query_embedding = QdrantRAG.get_embeddings(query)
@@ -183,21 +208,27 @@ class QdrantRAG:
             if not query_embedding:
                 return []
             
-            # Search Qdrant
+            # Search Qdrant WITHOUT filters (more reliable)
+            # We'll filter in the payload results instead
             results = client.search(
                 collection_name=collection_name,
                 query_vector=query_embedding,
-                limit=limit
+                limit=limit * 2  # Get more results to filter
             )
             
             # Extract relevant info
             documents = []
             for result in results:
-                documents.append({
-                    "text": result.payload.get("text", ""),
-                    "file_name": result.payload.get("file_name", "Unknown"),
-                    "score": result.score
-                })
+                # Make sure the result is actually from this subject
+                if result.payload.get("subject", "").lower() == subject.lower():
+                    documents.append({
+                        "text": result.payload.get("text", ""),
+                        "file_name": result.payload.get("file_name", "Unknown"),
+                        "score": result.score
+                    })
+                    
+                    if len(documents) >= limit:
+                        break
             
             return documents
             
@@ -249,7 +280,7 @@ Instructions:
 Answer:"""
                     
                     response = openai.ChatCompletion.create(
-                        model="gpt-4.o mini",  # Cheap: $0.50 per 1M tokens
+                        model="gpt-4o-mini",  # Cheap: $0.50 per 1M tokens
                         messages=[
                             {"role": "system", "content": "You are a helpful study assistant."},
                             {"role": "user", "content": prompt}
@@ -328,33 +359,64 @@ Answer clearly in {language}:"""
     
     @staticmethod
     def get_document_summary(file_name, subject):
-        """Get summary of a specific document"""
+        """Get summary of a specific document - NO filters, pure Python filtering"""
         try:
             client = QdrantRAG.get_client()
             if not client:
                 return "⚠️ Qdrant not configured"
             
-            collection_name = f"subject_{subject.lower().replace(' ', '_').replace('+', '').replace('(', '').replace(')', '')}"
+            collection_name = f"subject_{subject.lower().replace(' ', '_').replace('+', '').replace('(', '').replace(')', '').replace(',', '')}"
             
-            # Get all chunks from this file
-            results = client.scroll(
-                collection_name=collection_name,
-                scroll_filter={
-                    "must": [
-                        {"key": "file_name", "match": {"value": file_name}}
-                    ]
-                },
-                limit=100
-            )
+            # Check if collection exists
+            try:
+                collections = client.get_collections().collections
+                collection_exists = any(col.name == collection_name for col in collections)
+                
+                if not collection_exists:
+                    return f"No vector database found for {subject}. Upload files first."
+            except:
+                return "Could not check collections."
             
-            if not results[0]:
-                return "No content found."
-            
-            # Combine first few chunks as summary
-            chunks = [point.payload.get("text", "") for point in results[0][:3]]
-            summary = "\n\n".join(chunks)
-            
-            return f"📄 **{file_name}**\n\n{summary[:1000]}...\n\n💡 Contains {len(results[0])} sections total."
+            # Get ALL points without any filters
+            try:
+                # Use scroll with no filters at all
+                all_points, _ = client.scroll(
+                    collection_name=collection_name,
+                    limit=200,  # Get more points to ensure we find the file
+                    with_payload=True,
+                    with_vectors=False  # Don't need vectors, just payload
+                )
+                
+                if not all_points or len(all_points) == 0:
+                    return "No documents found in this collection."
+                
+                # Filter for matching file_name in Python (not in Qdrant)
+                matching_chunks = []
+                for point in all_points:
+                    point_file = point.payload.get("file_name", "")
+                    # Case-insensitive comparison
+                    if point_file.lower() == file_name.lower():
+                        chunk_text = point.payload.get("text", "")
+                        chunk_index = point.payload.get("chunk_index", 0)
+                        matching_chunks.append((chunk_index, chunk_text))
+                
+                if not matching_chunks:
+                    return f"No content found for '{file_name}'. Available files in collection: {len(set(p.payload.get('file_name', 'Unknown') for p in all_points))}"
+                
+                # Sort by chunk index
+                matching_chunks.sort(key=lambda x: x[0])
+                
+                # Combine first few chunks as summary
+                summary_chunks = [text for _, text in matching_chunks[:3]]
+                summary = "\n\n".join(summary_chunks)
+                
+                if len(summary) > 1000:
+                    summary = summary[:1000] + "..."
+                
+                return f"📄 **{file_name}**\n\n{summary}\n\n💡 Contains {len(matching_chunks)} sections total."
+                
+            except Exception as scroll_error:
+                return f"Error reading collection: {str(scroll_error)}"
             
         except Exception as e:
             return f"Error: {str(e)}"
@@ -371,7 +433,7 @@ Answer clearly in {language}:"""
             for doc in subjects:
                 subject_data = doc.to_dict()
                 subject_name = f"{subject_data.get('name', '')} ({subject_data.get('category', '')})"
-                collection_name = f"subject_{subject_name.lower().replace(' ', '_').replace('+', '').replace('(', '').replace(')', '')}"
+                collection_name = f"subject_{subject_name.lower().replace(' ', '_').replace('+', '').replace('(', '').replace(')', '').replace(',', '')}"
                 
                 if QdrantRAG.create_collection_if_not_exists(collection_name):
                     created.append(subject_name)
