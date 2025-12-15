@@ -18,8 +18,20 @@ def render_dashboard():
                 {'id': 'physics_a', 'name': 'Physics', 'category': 'A Levels', 'icon': '🔬', 'color': '#dcfce7'}
             ]
         else:
-            subjects = [doc.to_dict() for doc in subjects_docs]
-    except:
+            subjects = []
+            for doc in subjects_docs:
+                data = doc.to_dict()
+                # Ensure all required fields exist with defaults
+                subject = {
+                    'id': data.get('id', doc.id),  # Use doc.id as fallback
+                    'name': data.get('name', 'Unknown Subject'),
+                    'category': data.get('category', 'General'),
+                    'icon': data.get('icon', '📚'),
+                    'color': data.get('color', '#dbeafe')
+                }
+                subjects.append(subject)
+    except Exception as e:
+        st.error(f"Error loading subjects: {e}")
         # Fallback to default
         subjects = [
             {'id': 'physics_o', 'name': 'Physics', 'category': 'O Levels', 'icon': '⚡', 'color': '#dbeafe'},
@@ -97,18 +109,26 @@ def render_dashboard():
     cols = st.columns(3)
     for idx, subject in enumerate(subjects):
         with cols[idx % 3]:
+            # Safely get all values with defaults
+            icon = subject.get('icon', '📚')
+            name = subject.get('name', 'Unknown')
+            category = subject.get('category', 'General')
+            color = subject.get('color', '#dbeafe')
+            resources = subject.get('resources', 0)
+            subject_id = subject.get('id', f'subject_{idx}')
+            
             st.markdown(f"""
-                <div class="subject-card" style="background: linear-gradient(135deg, white 0%, {subject.get('color', '#dbeafe')} 100%);">
-                    <div class="subject-icon">{subject.get('icon', '📚')}</div>
-                    <h3 class="subject-name">{subject['name']}</h3>
-                    <span class="subject-badge">{subject.get('category', 'General')}</span>
+                <div class="subject-card" style="background: linear-gradient(135deg, white 0%, {color} 100%);">
+                    <div class="subject-icon">{icon}</div>
+                    <h3 class="subject-name">{name}</h3>
+                    <span class="subject-badge">{category}</span>
                     <p style="color: #6b7280; font-size: 0.95rem; margin-top: 15px;">
-                        {subject.get('resources', 0)} resources available
+                        {resources} resources available
                     </p>
                 </div>
             """, unsafe_allow_html=True)
             
-            if st.button(f"Open {subject['name']} ✧", key=subject['id'], use_container_width=True, type="primary"):
+            if st.button(f"Open {name} ✧", key=subject_id, use_container_width=True, type="primary"):
                 st.session_state.selected_subject = subject
                 st.rerun()
     

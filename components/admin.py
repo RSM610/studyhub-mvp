@@ -200,28 +200,63 @@ def render_admin_panel():
     with tab4:
         st.subheader("📚 Manage Subjects")
         
+        # Show existing subjects first
+        st.markdown("### Current Subjects")
+        try:
+            existing_subjects = list(db.collection('subjects').stream())
+            if existing_subjects:
+                for doc in existing_subjects:
+                    data = doc.to_dict()
+                    col1, col2 = st.columns([4, 1])
+                    with col1:
+                        st.markdown(f"{data.get('icon', '📚')} **{data.get('name', 'Unknown')}** - {data.get('category', 'N/A')}")
+                    with col2:
+                        if st.button("🗑️", key=f"del_subj_{doc.id}"):
+                            db.collection('subjects').document(doc.id).delete()
+                            st.success(f"Deleted {data.get('name', 'subject')}!")
+                            time.sleep(1)
+                            st.rerun()
+            else:
+                st.info("No subjects created yet")
+        except Exception as e:
+            st.error(f"Error loading subjects: {e}")
+        
+        st.markdown("---")
+        st.markdown("### Add New Subject")
+        
         col1, col2 = st.columns(2)
         
         with col1:
-            new_subject_name = st.text_input("Subject Name", placeholder="e.g., Chemistry")
-            new_subject_category = st.text_input("Category", placeholder="e.g., O Levels")
+            new_subject_name = st.text_input("Subject Name", placeholder="e.g., Chemistry", key="new_subj_name")
+            new_subject_category = st.text_input("Category", placeholder="e.g., O Levels", key="new_subj_cat")
         
         with col2:
-            new_subject_icon = st.text_input("Icon", placeholder="e.g., ⚗️")
-            new_subject_color = st.color_picker("Color", "#dbeafe")
+            new_subject_icon = st.text_input("Icon", placeholder="e.g., ⚗️", key="new_subj_icon")
+            new_subject_color = st.color_picker("Color", "#dbeafe", key="new_subj_color")
         
-        if st.button("➕ Add Subject", type="primary"):
+        if st.button("➕ Add Subject", type="primary", key="add_subject_btn"):
             if new_subject_name:
-                db.collection('subjects').document(new_subject_name.lower().replace(' ', '_')).set({
-                    'name': new_subject_name,
-                    'category': new_subject_category,
-                    'icon': new_subject_icon,
-                    'color': new_subject_color,
-                    'created_at': datetime.now()
-                })
-                st.success(f"Added {new_subject_name}!")
-                time.sleep(1)
-                st.rerun()
+                # Generate a unique ID for the subject
+                subject_id = new_subject_name.lower().replace(' ', '_').replace('+', '').replace('(', '').replace(')', '').replace(',', '')
+                
+                # Create the subject with ALL required fields
+                try:
+                    db.collection('subjects').document(subject_id).set({
+                        'id': subject_id,  # CRITICAL: Add the ID field
+                        'name': new_subject_name.strip(),
+                        'category': new_subject_category.strip() if new_subject_category else 'General',  # Default to 'General' if empty
+                        'icon': new_subject_icon.strip() if new_subject_icon else '📚',  # Default icon if empty
+                        'color': new_subject_color if new_subject_color else '#dbeafe',
+                        'created_at': datetime.now()
+                    })
+                    st.success(f"✨ Added {new_subject_name}!")
+                    st.balloons()
+                    time.sleep(1)
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error adding subject: {e}")
+            else:
+                st.error("Please enter a subject name!")
     
     with tab5:
         st.subheader("🗑️ Database Cleanup")
