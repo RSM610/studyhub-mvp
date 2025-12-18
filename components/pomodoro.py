@@ -1,8 +1,9 @@
 import streamlit as st
 from datetime import datetime, timedelta
+import time
 
 class PomodoroTimer:
-    """Pomodoro timer with virtual plant growth - smooth, no glitches"""
+    """Pomodoro timer with virtual plant growth - smooth auto-update without disrupting app"""
     
     @staticmethod
     def init_pomodoro():
@@ -15,6 +16,7 @@ class PomodoroTimer:
             st.session_state.plant_water = 0
             st.session_state.plant_stage = 0  # 0: seed, 1: sprout, 2: small, 3: medium, 4: full
             st.session_state.last_water = datetime.now()
+            st.session_state.pomo_last_update = datetime.now()
         
         # Initialize completed_cycles if not exists
         if 'completed_cycles' not in st.session_state:
@@ -29,9 +31,9 @@ class PomodoroTimer:
         elapsed = (datetime.now() - st.session_state.pomo_start_time).total_seconds()
         remaining = max(0, st.session_state.pomo_duration - elapsed)
         
-        # Check if cycle complete
+        # Check if cycle complete (but don't rerun immediately)
         if remaining == 0 and st.session_state.pomo_running:
-            PomodoroTimer.complete_cycle()
+            st.session_state.pomo_needs_completion = True
         
         return int(remaining)
     
@@ -60,6 +62,7 @@ class PomodoroTimer:
         st.session_state.pomo_running = False
         st.session_state.pomo_start_time = None
         st.session_state.last_water = datetime.now()
+        st.session_state.pomo_needs_completion = False
     
     @staticmethod
     def get_plant_emoji():
@@ -88,10 +91,14 @@ class PomodoroTimer:
     
     @staticmethod
     def render_timer():
-        """Render the pomodoro timer - NO AUTO-RERUN"""
+        """Render the pomodoro timer with auto-update using JavaScript"""
         try:
             PomodoroTimer.init_pomodoro()
             PomodoroTimer.check_plant_health()
+            
+            # Check if cycle needs completion
+            if st.session_state.get('pomo_needs_completion', False):
+                PomodoroTimer.complete_cycle()
         except:
             return  # Gracefully fail if there's an issue
         
@@ -118,6 +125,14 @@ class PomodoroTimer:
                 height: 100%;
                 transition: width 0.3s ease;
             }
+            .timer-display {
+                font-size: 2.5rem;
+                font-weight: 700;
+                color: #7c3aed;
+                text-align: center;
+                margin: 20px 0;
+                font-family: 'Courier New', monospace;
+            }
             </style>
         """, unsafe_allow_html=True)
         
@@ -141,13 +156,61 @@ class PomodoroTimer:
             <p style="color: #a855f7; font-size: 0.9rem; margin: 5px 0; text-align: center;">Water: {st.session_state.plant_water}/20 💧</p>
         """, unsafe_allow_html=True)
         
-        # Timer display
+        # Timer display with auto-update
         time_left = PomodoroTimer.get_time_left()
         minutes = time_left // 60
         seconds = time_left % 60
         mode_emoji = '📚' if st.session_state.pomo_mode == 'work' else '☕'
         
-        st.markdown(f'<h1 style="text-align: center; color: #7c3aed; margin: 20px 0;">{mode_emoji} {minutes:02d}:{seconds:02d}</h1>', unsafe_allow_html=True)
+        # Create placeholder for timer that updates
+        timer_placeholder = st.empty()
+        
+        if st.session_state.pomo_running:
+            # Use HTML/JS for smooth countdown without reruns
+            timer_placeholder.markdown(f"""
+                <div class="timer-display" id="pomodoro-timer">
+                    {mode_emoji} <span id="timer-text">{minutes:02d}:{seconds:02d}</span>
+                </div>
+                <script>
+                    (function() {{
+                        var startTime = {st.session_state.pomo_start_time.timestamp()};
+                        var duration = {st.session_state.pomo_duration};
+                        
+                        function updateTimer() {{
+                            var now = Date.now() / 1000;
+                            var elapsed = now - startTime;
+                            var remaining = Math.max(0, Math.floor(duration - elapsed));
+                            
+                            var minutes = Math.floor(remaining / 60);
+                            var seconds = remaining % 60;
+                            
+                            var timerText = document.getElementById('timer-text');
+                            if (timerText) {{
+                                timerText.textContent = 
+                                    String(minutes).padStart(2, '0') + ':' + 
+                                    String(seconds).padStart(2, '0');
+                            }}
+                            
+                            if (remaining > 0) {{
+                                setTimeout(updateTimer, 1000);
+                            }} else {{
+                                // Timer complete - trigger refresh
+                                setTimeout(function() {{
+                                    window.location.reload();
+                                }}, 1000);
+                            }}
+                        }}
+                        
+                        updateTimer();
+                    }})();
+                </script>
+            """, unsafe_allow_html=True)
+        else:
+            timer_placeholder.markdown(f"""
+                <div class="timer-display">
+                    {mode_emoji} {minutes:02d}:{seconds:02d}
+                </div>
+            """, unsafe_allow_html=True)
         
         # Controls
         col1, col2, col3 = st.columns(3)

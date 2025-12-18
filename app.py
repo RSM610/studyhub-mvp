@@ -25,28 +25,34 @@ try:
 except:
     ADMIN_EMAIL = "u2023610@giki.edu.pk"
 
-if 'user' not in st.session_state:
-    st.session_state.user = None
+# Initialize all session state variables ONCE at the start
+def init_session_state():
+    """Initialize all session state variables to prevent KeyErrors"""
+    defaults = {
+        'user': None,
+        'ad_last_shown': time.time(),
+        'selected_subject': None,
+        'firebase_doc_id': None,
+        'show_admin': False,
+        'show_calendar': False,
+        'admin_authenticated': False,
+        'download_subject': None,
+        'messages': [],
+        'pomo_needs_completion': False,
+    }
+    
+    for key, default_value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = default_value
 
-if 'ad_last_shown' not in st.session_state:
-    st.session_state.ad_last_shown = time.time()
-
-if 'selected_subject' not in st.session_state:
-    st.session_state.selected_subject = None
-
-if 'firebase_doc_id' not in st.session_state:
-    st.session_state.firebase_doc_id = None
-
-if 'show_admin' not in st.session_state:
-    st.session_state.show_admin = False
-
-if 'show_calendar' not in st.session_state:
-    st.session_state.show_calendar = False
+# Call initialization
+init_session_state()
 
 # Initialize metrics only when user is logged in
 if st.session_state.user:
     MetricsTracker.init_session()
 
+# CSS Styles
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
@@ -154,12 +160,19 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+# Main App Logic
 if not st.session_state.user:
+    # Not logged in - show auth
     render_auth()
 else:
+    # Logged in - check achievements without triggering reruns
     AchievementSystem.check_achievements()
-    AchievementSystem.show_notifications()
     
+    # Only show new achievement notifications (this may trigger balloons)
+    if st.session_state.get('new_achievements'):
+        AchievementSystem.show_notifications()
+    
+    # Sidebar
     with st.sidebar:
         st.markdown("""
             <div style="text-align: center; margin-bottom: 20px;">
@@ -168,6 +181,7 @@ else:
             </div>
         """, unsafe_allow_html=True)
         
+        # User info
         st.markdown(f"""
             <div style="background: white; padding: 20px; border-radius: 15px; 
                  text-align: center; margin-bottom: 15px; border: 2px solid #fce7f3;">
@@ -181,6 +195,7 @@ else:
             </div>
         """, unsafe_allow_html=True)
         
+        # Navigation buttons
         col1, col2 = st.columns(2)
         
         with col1:
@@ -197,7 +212,7 @@ else:
                 st.session_state.selected_subject = None
                 st.rerun()
         
-        # Admin button
+        # Admin button (only show to admin)
         if st.session_state.user['email'] == ADMIN_EMAIL:
             if st.button("🛡️ Admin Panel", use_container_width=True, key="btn_show_admin"):
                 st.session_state.show_admin = True
@@ -205,12 +220,16 @@ else:
                 st.session_state.selected_subject = None
                 st.rerun()
         
+        # Logout button
         if st.button("🚪 Logout", use_container_width=True, key="logout_sidebar"):
             user_id = st.session_state.user['id']
             duration = MetricsTracker.get_session_duration()
             
             if st.session_state.firebase_doc_id:
-                FirebaseOps.track_session_duration(st.session_state.firebase_doc_id, duration)
+                try:
+                    FirebaseOps.track_session_duration(st.session_state.firebase_doc_id, duration)
+                except Exception as e:
+                    st.warning(f"Could not save session data: {e}")
             
             metrics = MetricsTracker.get_metrics_summary()
             st.success(f"""
@@ -223,41 +242,45 @@ else:
             """)
             
             time.sleep(2)
-            st.session_state.clear()
+            
+            # Clear all session state
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            
             st.rerun()
         
         st.markdown("---")
         
+        # Achievements panel
         AchievementSystem.render_achievements_panel()
         
         st.markdown("---")
         
+        # Pomodoro Timer
         st.markdown("""
             <h3 class="gradient-text" style="font-size: 1.5rem; text-align: center; margin-bottom: 20px;">
                 Pomodoro Timer
             </h3>
         """, unsafe_allow_html=True)
         
-        # Render timer (now it won't auto-rerun)
+        # Render timer (now with auto-update via JavaScript)
         PomodoroTimer.render_timer()
-        
-        # Manual refresh button for timer
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.session_state.get('pomo_running', False):
-            if st.button("🔄 Refresh Timer", use_container_width=True, key="refresh_timer"):
-                st.rerun()
     
     # Mascot bar
     Mascot.render_mascot_bar()
     
-    # Ad logic
+    # Ad logic - only check time, don't force rerun
     current_time = time.time()
-    if current_time - st.session_state.ad_last_shown > 150:
+    ad_interval = 150  # 2.5 minutes
+    
+    if current_time - st.session_state.ad_last_shown > ad_interval:
+        # Show ad and update timestamp
         show_ad()
         st.session_state.ad_last_shown = current_time
+        # Ad function internally handles any necessary reruns
         st.rerun()
     
-    # Route
+    # Main content routing
     if st.session_state.show_admin:
         render_admin_panel()
     elif st.session_state.show_calendar:

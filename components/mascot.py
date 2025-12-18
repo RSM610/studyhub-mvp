@@ -66,7 +66,7 @@ class Mascot:
         st.session_state.mascot_mood = mood
         emoji = Mascot.MOODS[mood]['emoji']
         
-        # Update position (walk animation)
+        # Update position (walk animation) - but don't trigger rerun
         st.session_state.mascot_position = (st.session_state.mascot_position + 0.5) % 90
         
         # Display mascot info
@@ -90,18 +90,19 @@ class Mascot:
             """, unsafe_allow_html=True)
         
         with col2:
-            if st.button("🎮 Play", key="mascot_play_btn"):
+            if st.button("🎮 Play", key="mascot_play_btn", use_container_width=True):
                 Mascot.interact()
                 st.rerun()
         
         with col3:
-            if st.button("🍰 Feed", key="mascot_feed_btn"):
+            if st.button("🍰 Feed", key="mascot_feed_btn", use_container_width=True):
                 st.session_state.mascot_happiness = min(100, st.session_state.mascot_happiness + 15)
                 st.session_state.mascot_message = "Yummy! 😋"
+                st.session_state.last_interaction = datetime.now()
                 st.rerun()
         
         with col4:
-            if st.button("✨ Pet", key="mascot_pet_btn"):
+            if st.button("✨ Pet", key="mascot_pet_btn", use_container_width=True):
                 Mascot.interact()
                 st.balloons()
                 st.rerun()
