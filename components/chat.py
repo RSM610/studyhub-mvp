@@ -186,7 +186,7 @@ def render_chat():
     
     st.markdown("---")
     
-    # Show resources in expandable
+    # Show resources in expandable WITH DOWNLOAD
     with st.expander(f"📚 View {len(subject_files)} Resources", expanded=False):
         if len(subject_files) == 0:
             st.info(f"No resources yet. Upload some materials to get started!")
@@ -197,8 +197,16 @@ def render_chat():
                     st.write(f"📄 **{file_data.get('file_name', 'Unknown')}**")
                     st.caption(f"Size: {file_data.get('file_size', 0) / 1024:.1f} KB")
                 with col2:
-                    if st.button("📊 Info", key=f"info_{doc_id}"):
-                        st.info("✨ This file is searchable by AI")
+                    # Download button instead of Info button
+                    download_data = f"File: {file_data.get('file_name', 'Unknown')}\nSubject: {subject_full_name}\nDoc ID: {doc_id}"
+                    st.download_button(
+                        label="📥 Download",
+                        data=download_data.encode(),
+                        file_name=f"{file_data.get('file_name', 'file.txt')}",
+                        mime="text/plain",
+                        key=f"dl_chat_{doc_id}",
+                        use_container_width=True
+                    )
     
     st.markdown("---")
     

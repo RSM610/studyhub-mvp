@@ -144,15 +144,9 @@ def render_dashboard():
                 </div>
             """, unsafe_allow_html=True)
             
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button(f"📖 Open", key=f"open_{subject_id}", use_container_width=True, type="primary"):
-                    st.session_state.selected_subject = subject
-                    st.rerun()
-            with col2:
-                if st.button(f"📥 Files", key=f"download_{subject_id}", use_container_width=True):
-                    st.session_state.download_subject = subject
-                    st.rerun()
+            if st.button(f"Open {name} ✧", key=subject_id, use_container_width=True, type="primary"):
+                st.session_state.selected_subject = subject
+                st.rerun()
     
     # Download modal
     if st.session_state.get('download_subject'):
