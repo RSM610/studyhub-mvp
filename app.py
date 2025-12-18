@@ -46,7 +46,9 @@ if 'show_calendar' not in st.session_state:
 if 'timer_paused' not in st.session_state:
     st.session_state.timer_paused = False
 
-MetricsTracker.init_session()
+# MOVE MetricsTracker.init_session() HERE - only initialize when user is logged in
+if st.session_state.user:
+    MetricsTracker.init_session()
 
 st.markdown("""
     <style>
