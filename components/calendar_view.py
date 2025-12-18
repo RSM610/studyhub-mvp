@@ -1,5 +1,5 @@
 import streamlit as st
-from datetime import datetime, timedelta, time as dt_time
+from datetime import datetime, timedelta
 from utils.firebase_ops import FirebaseOps
 from config.firebase_config import db
 
@@ -243,7 +243,6 @@ def render_calendar():
                 
                 st.success(f"✨ Added **{new_subject}** ({start_time_str} - {end_time_str}) to schedule!")
                 st.balloons()
-                time.sleep(1)
                 st.rerun()
     
     st.markdown("<br>", unsafe_allow_html=True)
