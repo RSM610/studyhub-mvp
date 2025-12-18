@@ -43,10 +43,7 @@ if 'show_admin' not in st.session_state:
 if 'show_calendar' not in st.session_state:
     st.session_state.show_calendar = False
 
-if 'timer_paused' not in st.session_state:
-    st.session_state.timer_paused = False
-
-# MOVE MetricsTracker.init_session() HERE - only initialize when user is logged in
+# Initialize metrics only when user is logged in
 if st.session_state.user:
     MetricsTracker.init_session()
 
@@ -200,7 +197,7 @@ else:
                 st.session_state.selected_subject = None
                 st.rerun()
         
-        # Admin button with unique key
+        # Admin button
         if st.session_state.user['email'] == ADMIN_EMAIL:
             if st.button("🛡️ Admin Panel", use_container_width=True, key="btn_show_admin"):
                 st.session_state.show_admin = True
@@ -241,9 +238,14 @@ else:
             </h3>
         """, unsafe_allow_html=True)
         
-        # Timer with pause functionality to prevent rerun issues
-        if not st.session_state.get('timer_paused', False):
-            PomodoroTimer.render_timer()
+        # Render timer (now it won't auto-rerun)
+        PomodoroTimer.render_timer()
+        
+        # Manual refresh button for timer
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.session_state.get('pomo_running', False):
+            if st.button("🔄 Refresh Timer", use_container_width=True, key="refresh_timer"):
+                st.rerun()
     
     # Mascot bar
     Mascot.render_mascot_bar()

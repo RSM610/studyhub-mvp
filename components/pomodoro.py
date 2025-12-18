@@ -2,7 +2,7 @@ import streamlit as st
 from datetime import datetime, timedelta
 
 class PomodoroTimer:
-    """Pomodoro timer with virtual plant growth - non-blocking"""
+    """Pomodoro timer with virtual plant growth - smooth, no glitches"""
     
     @staticmethod
     def init_pomodoro():
@@ -88,7 +88,7 @@ class PomodoroTimer:
     
     @staticmethod
     def render_timer():
-        """Render the pomodoro timer - non-blocking"""
+        """Render the pomodoro timer - NO AUTO-RERUN"""
         try:
             PomodoroTimer.init_pomodoro()
             PomodoroTimer.check_plant_health()
@@ -181,8 +181,9 @@ class PomodoroTimer:
                 PomodoroTimer.water_plant()
                 st.rerun()
         
-        # Auto-refresh if timer is running (but not too often to avoid crashes)
-        if st.session_state.pomo_running:
-            import time as pytime
-            pytime.sleep(0.5)  # Small delay to prevent rapid reruns
-            st.rerun()
+        # Show status message when timer completes
+        if time_left == 0 and not st.session_state.pomo_running:
+            if st.session_state.pomo_mode == 'break':
+                st.success("✨ Break time! Stretch and relax~")
+            else:
+                st.success("🎉 Work session complete! Great job!")
