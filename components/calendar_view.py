@@ -1,10 +1,10 @@
 import streamlit as st
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time as dt_time
 from utils.firebase_ops import FirebaseOps
 from config.firebase_config import db
 
 def render_calendar():
-    """Render calendar schedule planner with proper persistence and logic"""
+    """Render calendar schedule planner with proper time input controls"""
     
     st.markdown("""
         <style>
@@ -46,7 +46,6 @@ def render_calendar():
     # Load calendar events from Firebase on first render
     if 'calendar_events' not in st.session_state or 'calendar_loaded' not in st.session_state:
         try:
-            # Try to load from Firebase
             user_calendar = db.collection('calendars').document(user_id).get()
             
             if user_calendar.exists:
@@ -64,7 +63,6 @@ def render_calendar():
     # Initialize current_week_start
     if 'current_week_start' not in st.session_state:
         today = datetime.now().date()
-        # Set to Monday of current week
         days_since_monday = today.weekday()
         st.session_state.current_week_start = today - timedelta(days=days_since_monday)
     
@@ -94,7 +92,7 @@ def render_calendar():
             st.session_state.current_week_start += timedelta(days=7)
             st.rerun()
     
-    # Today button for quick navigation
+    # Today button
     today = datetime.now().date()
     today_week_start = today - timedelta(days=today.weekday())
     
@@ -105,91 +103,148 @@ def render_calendar():
     
     st.markdown("---")
     
-    # Add new event section
+    # Add new event section with PROPER time inputs
     with st.expander("➕ Add New Study Session", expanded=False):
-        # Use unique keys with timestamp to prevent conflicts
-        event_key = st.session_state.get('event_form_key', datetime.now().timestamp())
+        st.markdown("### 📝 New Session Details")
         
         new_date = st.date_input(
-            "Date",
+            "📅 Date",
             value=datetime.now().date(),
-            key=f"new_event_date_{event_key}"
+            key="new_event_date",
+            help="Select the date for this study session"
         )
         
         new_subject = st.text_input(
-            "Subject",
-            placeholder="e.g., Physics, Business, etc.",
-            key=f"new_event_subject_{event_key}"
+            "📚 Subject",
+            placeholder="e.g., Physics, Business, Math, etc.",
+            key="new_event_subject",
+            help="What will you be studying?"
         )
         
-        col_time1, col_time2 = st.columns(2)
-        with col_time1:
-            new_start = st.time_input(
-                "Start Time",
-                value=datetime.now().time(),
-                key=f"new_event_start_{event_key}"
-            )
+        st.markdown("#### ⏰ Time")
         
-        with col_time2:
-            # Default end time is 1 hour after start
-            default_end = (datetime.combine(datetime.today(), new_start) + timedelta(hours=1)).time()
-            new_end = st.time_input(
-                "End Time",
-                value=default_end,
-                key=f"new_event_end_{event_key}"
-            )
+        # Manual time input using number inputs
+        col_start, col_end = st.columns(2)
+        
+        with col_start:
+            st.markdown("**Start Time**")
+            start_col1, start_col2 = st.columns(2)
+            
+            with start_col1:
+                start_hour = st.number_input(
+                    "Hour",
+                    min_value=0,
+                    max_value=23,
+                    value=9,
+                    key="start_hour",
+                    label_visibility="visible"
+                )
+            
+            with start_col2:
+                start_minute = st.number_input(
+                    "Minute",
+                    min_value=0,
+                    max_value=59,
+                    value=0,
+                    step=15,
+                    key="start_minute",
+                    label_visibility="visible"
+                )
+            
+            start_time_str = f"{start_hour:02d}:{start_minute:02d}"
+            st.info(f"▶️ Start: **{start_time_str}**")
+        
+        with col_end:
+            st.markdown("**End Time**")
+            end_col1, end_col2 = st.columns(2)
+            
+            with end_col1:
+                end_hour = st.number_input(
+                    "Hour",
+                    min_value=0,
+                    max_value=23,
+                    value=10,
+                    key="end_hour",
+                    label_visibility="visible"
+                )
+            
+            with end_col2:
+                end_minute = st.number_input(
+                    "Minute",
+                    min_value=0,
+                    max_value=59,
+                    value=0,
+                    step=15,
+                    key="end_minute",
+                    label_visibility="visible"
+                )
+            
+            end_time_str = f"{end_hour:02d}:{end_minute:02d}"
+            st.info(f"⏹️ End: **{end_time_str}**")
+        
+        # Duration calculation
+        start_total_minutes = start_hour * 60 + start_minute
+        end_total_minutes = end_hour * 60 + end_minute
+        duration_minutes = end_total_minutes - start_total_minutes
+        
+        if duration_minutes > 0:
+            st.success(f"⏱️ Duration: **{duration_minutes} minutes** ({duration_minutes/60:.1f} hours)")
+        elif duration_minutes < 0:
+            st.error(f"❌ End time must be after start time!")
+        else:
+            st.warning("⚠️ Duration is 0 minutes")
         
         new_notes = st.text_area(
-            "Notes (optional)",
-            placeholder="Topics to cover, homework, etc.",
-            key=f"new_event_notes_{event_key}",
-            height=100
+            "📝 Notes (optional)",
+            placeholder="Topics to cover, homework, chapter numbers, etc.",
+            key="new_event_notes",
+            height=100,
+            help="Add any additional details about this study session"
         )
         
-        if st.button("✨ Add to Schedule", type="primary", use_container_width=True, key=f"add_event_{event_key}"):
-            if new_subject and new_subject.strip():
-                # Validate time logic
-                if new_start >= new_end:
-                    st.error("❌ End time must be after start time!")
-                else:
-                    date_key = new_date.isoformat()
-                    
-                    if date_key not in st.session_state.calendar_events:
-                        st.session_state.calendar_events[date_key] = []
-                    
-                    event = {
-                        'subject': new_subject.strip(),
-                        'start_time': new_start.strftime('%H:%M'),
-                        'end_time': new_end.strftime('%H:%M'),
-                        'notes': new_notes.strip(),
-                        'completed': False,
-                        'created_at': datetime.now().isoformat()
-                    }
-                    
-                    st.session_state.calendar_events[date_key].append(event)
-                    
-                    # Sort events by start time
-                    st.session_state.calendar_events[date_key].sort(
-                        key=lambda x: x['start_time']
-                    )
-                    
-                    # Save to Firebase
-                    try:
-                        db.collection('calendars').document(user_id).set({
-                            'user_id': user_id,
-                            'events': st.session_state.calendar_events,
-                            'last_updated': datetime.now()
-                        })
-                    except Exception as e:
-                        st.warning(f"Could not save to Firebase: {e}")
-                    
-                    st.success(f"✨ Added {new_subject} to schedule!")
-                    
-                    # Update form key to reset form
-                    st.session_state.event_form_key = datetime.now().timestamp()
-                    st.rerun()
-            else:
+        st.markdown("---")
+        
+        if st.button("✨ Add to Schedule", type="primary", use_container_width=True, key="add_event"):
+            if not new_subject or not new_subject.strip():
                 st.error("❌ Please enter a subject name")
+            elif duration_minutes <= 0:
+                st.error("❌ End time must be after start time!")
+            else:
+                date_key = new_date.isoformat()
+                
+                if date_key not in st.session_state.calendar_events:
+                    st.session_state.calendar_events[date_key] = []
+                
+                event = {
+                    'subject': new_subject.strip(),
+                    'start_time': start_time_str,
+                    'end_time': end_time_str,
+                    'notes': new_notes.strip(),
+                    'completed': False,
+                    'created_at': datetime.now().isoformat()
+                }
+                
+                st.session_state.calendar_events[date_key].append(event)
+                
+                # Sort events by start time
+                st.session_state.calendar_events[date_key].sort(
+                    key=lambda x: x['start_time']
+                )
+                
+                # Save to Firebase
+                try:
+                    db.collection('calendars').document(user_id).set({
+                        'user_id': user_id,
+                        'events': st.session_state.calendar_events,
+                        'last_updated': datetime.now()
+                    })
+                except Exception as e:
+                    st.warning(f"Could not save to Firebase: {e}")
+                
+                st.success(f"✨ Added **{new_subject}** ({start_time_str} - {end_time_str}) to schedule!")
+                st.balloons()
+                time.sleep(1)
+                st.rerun()
     
     st.markdown("<br>", unsafe_allow_html=True)
     
@@ -249,7 +304,6 @@ def render_calendar():
                         """, unsafe_allow_html=True)
                 
                 with col2:
-                    # Toggle completion
                     toggle_text = "↻" if event.get('completed', False) else "✓"
                     toggle_key = f"toggle_{date_key}_{idx}_{event.get('created_at', '')}"
                     
@@ -257,7 +311,6 @@ def render_calendar():
                         st.session_state.calendar_events[date_key][idx]['completed'] = \
                             not event.get('completed', False)
                         
-                        # Save to Firebase
                         try:
                             db.collection('calendars').document(user_id).set({
                                 'user_id': user_id,
@@ -269,16 +322,13 @@ def render_calendar():
                         
                         st.rerun()
                     
-                    # Delete button
                     delete_key = f"delete_{date_key}_{idx}_{event.get('created_at', '')}"
                     if st.button("🗑️", key=delete_key, use_container_width=True):
                         st.session_state.calendar_events[date_key].pop(idx)
                         
-                        # Clean up empty days
                         if not st.session_state.calendar_events[date_key]:
                             del st.session_state.calendar_events[date_key]
                         
-                        # Save to Firebase
                         try:
                             db.collection('calendars').document(user_id).set({
                                 'user_id': user_id,
@@ -294,11 +344,10 @@ def render_calendar():
     
     st.markdown("---")
     
-    # Week summary with proper date range calculation
+    # Week summary
     week_start = st.session_state.current_week_start
     week_end = week_start + timedelta(days=6)
     
-    # Count sessions for current week only
     total_sessions = 0
     completed_sessions = 0
     
@@ -310,7 +359,6 @@ def render_calendar():
         total_sessions += len(day_events)
         completed_sessions += sum(1 for event in day_events if event.get('completed', False))
     
-    # Calculate completion percentage
     completion_percentage = (completed_sessions / total_sessions * 100) if total_sessions > 0 else 0
     
     st.markdown(f"""
@@ -336,7 +384,6 @@ def render_calendar():
     
     col1, col2, col3, col4 = st.columns(4)
     
-    # Calculate all-time statistics
     all_events = []
     for date_events in st.session_state.calendar_events.values():
         all_events.extend(date_events)
@@ -368,25 +415,22 @@ def render_calendar():
     with col4:
         st.metric("Overdue", overdue_count, delta=f"-{overdue_count}" if overdue_count > 0 else None)
     
-    # Clear completed sessions button
+    # Clear completed sessions
     if completed_all_time > 0:
         st.markdown("<br>", unsafe_allow_html=True)
         col_clear1, col_clear2, col_clear3 = st.columns([1, 1, 1])
         
         with col_clear2:
             if st.button("🧹 Clear All Completed Sessions", use_container_width=True):
-                # Remove all completed events
                 for date_key in list(st.session_state.calendar_events.keys()):
                     st.session_state.calendar_events[date_key] = [
                         event for event in st.session_state.calendar_events[date_key]
                         if not event.get('completed', False)
                     ]
                     
-                    # Clean up empty days
                     if not st.session_state.calendar_events[date_key]:
                         del st.session_state.calendar_events[date_key]
                 
-                # Save to Firebase
                 try:
                     db.collection('calendars').document(user_id).set({
                         'user_id': user_id,
