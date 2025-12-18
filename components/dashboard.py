@@ -3,9 +3,10 @@ from utils.firebase_ops import FirebaseOps
 from utils.metrics import MetricsTracker
 from utils.qdrant_ops import QdrantRAG
 from config.firebase_config import db
+import base64
 
 def render_dashboard():
-    """Render cute main dashboard with subject selection"""
+    """Render cute main dashboard with subject selection + DOWNLOAD"""
     
     # Get subjects from Firebase (dynamic)
     try:
@@ -77,6 +78,21 @@ def render_dashboard():
             font-weight: 600;
             border: 2px solid #fbcfe8;
         }
+        .download-btn {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 10px;
+            border: none;
+            font-weight: 600;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .download-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
+        }
         </style>
     """, unsafe_allow_html=True)
     
@@ -128,9 +144,78 @@ def render_dashboard():
                 </div>
             """, unsafe_allow_html=True)
             
-            if st.button(f"Open {name} ✧", key=subject_id, use_container_width=True, type="primary"):
-                st.session_state.selected_subject = subject
-                st.rerun()
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button(f"📖 Open", key=f"open_{subject_id}", use_container_width=True, type="primary"):
+                    st.session_state.selected_subject = subject
+                    st.rerun()
+            with col2:
+                if st.button(f"📥 Files", key=f"download_{subject_id}", use_container_width=True):
+                    st.session_state.download_subject = subject
+                    st.rerun()
+    
+    # Download modal
+    if st.session_state.get('download_subject'):
+        subject = st.session_state.download_subject
+        subject_full_name = f"{subject['name']} ({subject.get('category', 'General')})"
+        
+        st.markdown("---")
+        st.markdown(f"## 📥 Download Resources: {subject['icon']} {subject['name']}")
+        
+        # Get files for this subject
+        try:
+            all_files = list(db.collection('uploaded_files').stream())
+            subject_files = []
+            
+            for doc in all_files:
+                file_data = doc.to_dict()
+                if file_data.get('verified', False):
+                    if file_data.get('subject') == subject_full_name:
+                        subject_files.append((doc.id, file_data))
+        except Exception as e:
+            st.error(f"Error loading files: {e}")
+            subject_files = []
+        
+        if len(subject_files) == 0:
+            st.info(f"📭 No resources available for download yet. Upload some materials to get started!")
+        else:
+            st.success(f"✨ Found {len(subject_files)} resources!")
+            
+            for doc_id, file_data in subject_files:
+                col1, col2, col3 = st.columns([3, 1, 1])
+                
+                with col1:
+                    st.markdown(f"""
+                        **📄 {file_data.get('file_name', 'Unknown')}**
+                        
+                        Size: {file_data.get('file_size', 0) / 1024:.1f} KB
+                    """)
+                
+                with col2:
+                    st.caption(f"Uploaded: {file_data.get('upload_time', 'N/A')}")
+                
+                with col3:
+                    # Create download button
+                    # Note: This creates a placeholder - you need to store actual files
+                    # in Firebase Storage or another storage solution
+                    download_data = f"File: {file_data.get('file_name', 'Unknown')}\nSubject: {subject_full_name}\nDoc ID: {doc_id}"
+                    
+                    st.download_button(
+                        label="⬇️",
+                        data=download_data.encode(),
+                        file_name=f"{file_data.get('file_name', 'file.txt')}",
+                        mime="text/plain",
+                        key=f"dl_{doc_id}",
+                        use_container_width=True
+                    )
+                
+                st.markdown("---")
+        
+        if st.button("← Back to Subjects", key="close_download"):
+            st.session_state.download_subject = None
+            st.rerun()
+        
+        st.stop()  # Prevent rendering rest of dashboard
     
     st.markdown("<br><br>", unsafe_allow_html=True)
     
@@ -198,7 +283,7 @@ def render_dashboard():
                     if success_count > 0:
                         st.success(f"✨ Successfully uploaded {success_count}/{len(uploaded_files)} files!")
                         st.balloons()
-                        st.info("⏳ Your files are pending admin approval. Once verified, they'll be searchable by AI!")
+                        st.info("⏳ Your files are pending admin approval. Once verified, they'll be searchable and downloadable by everyone!")
                     else:
                         st.error("❌ No files were uploaded successfully. Please try again.")
                         
