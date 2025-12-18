@@ -1,16 +1,15 @@
 import streamlit as st
 from datetime import datetime, timedelta
-import time
 
 class PomodoroTimer:
-    """Pomodoro timer with virtual plant growth - uses Streamlit auto-refresh"""
+    """Pomodoro timer with virtual plant growth - non-blocking"""
     
     @staticmethod
     def init_pomodoro():
         """Initialize pomodoro state"""
         if 'pomo_start_time' not in st.session_state:
             st.session_state.pomo_start_time = None
-            st.session_state.pomo_duration = 25 * 60  # 25 minutes in seconds
+            st.session_state.pomo_duration = 25 * 60  # 25 minutes
             st.session_state.pomo_running = False
             st.session_state.pomo_mode = 'work'  # work or break
             st.session_state.plant_water = 0
@@ -30,10 +29,9 @@ class PomodoroTimer:
         elapsed = (datetime.now() - st.session_state.pomo_start_time).total_seconds()
         remaining = max(0, st.session_state.pomo_duration - elapsed)
         
-        # Auto-complete cycle when time runs out
-        if remaining <= 0 and st.session_state.pomo_running:
+        # Check if cycle complete
+        if remaining == 0 and st.session_state.pomo_running:
             PomodoroTimer.complete_cycle()
-            return 0
         
         return int(remaining)
     
@@ -89,26 +87,13 @@ class PomodoroTimer:
             st.session_state.last_water = datetime.now()
     
     @staticmethod
-    def format_time(total_seconds):
-        """Format seconds into MM:SS or HH:MM:SS if over an hour"""
-        hours = int(total_seconds // 3600)
-        minutes = int((total_seconds % 3600) // 60)
-        seconds = int(total_seconds % 60)
-        
-        if hours > 0:
-            return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-        else:
-            return f"{minutes:02d}:{seconds:02d}"
-    
-    @staticmethod
     def render_timer():
-        """Render the pomodoro timer with Streamlit auto-refresh"""
+        """Render the pomodoro timer - non-blocking"""
         try:
             PomodoroTimer.init_pomodoro()
             PomodoroTimer.check_plant_health()
-        except Exception as e:
-            st.error(f"Timer error: {e}")
-            return
+        except:
+            return  # Gracefully fail if there's an issue
         
         st.markdown("""
             <style>
@@ -116,7 +101,6 @@ class PomodoroTimer:
                 font-size: 4rem;
                 margin: 15px 0;
                 animation: gentle-sway 3s ease-in-out infinite;
-                text-align: center;
             }
             @keyframes gentle-sway {
                 0%, 100% { transform: rotate(-2deg); }
@@ -134,20 +118,12 @@ class PomodoroTimer:
                 height: 100%;
                 transition: width 0.3s ease;
             }
-            .timer-display {
-                font-size: 2.5rem;
-                font-weight: 700;
-                color: #7c3aed;
-                text-align: center;
-                margin: 20px 0;
-                font-family: 'Courier New', monospace;
-            }
             </style>
         """, unsafe_allow_html=True)
         
         # Plant display
         plant = PomodoroTimer.get_plant_emoji()
-        st.markdown(f'<div class="plant-display">{plant}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="plant-display" style="text-align: center;">{plant}</div>', unsafe_allow_html=True)
         
         # Growth stage
         stage_names = ['Seed', 'Sprout', 'Seedling', 'Young Plant', 'Blooming!']
@@ -167,26 +143,18 @@ class PomodoroTimer:
         
         # Timer display
         time_left = PomodoroTimer.get_time_left()
+        minutes = time_left // 60
+        seconds = time_left % 60
         mode_emoji = '📚' if st.session_state.pomo_mode == 'work' else '☕'
-        formatted_time = PomodoroTimer.format_time(time_left)
         
-        st.markdown(f"""
-            <div class="timer-display">
-                {mode_emoji} {formatted_time}
-            </div>
-        """, unsafe_allow_html=True)
-        
-        # Auto-refresh when running (using experimental_rerun)
-        if st.session_state.pomo_running and time_left > 0:
-            time.sleep(1)  # Wait 1 second
-            st.rerun()
+        st.markdown(f'<h1 style="text-align: center; color: #7c3aed; margin: 20px 0;">{mode_emoji} {minutes:02d}:{seconds:02d}</h1>', unsafe_allow_html=True)
         
         # Controls
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            button_text = "⏸️ Pause" if st.session_state.pomo_running else "▶️ Start"
-            if st.button(button_text, use_container_width=True, type="primary", key="pomo_start"):
+            if st.button("▶️ Start" if not st.session_state.pomo_running else "⏸️ Pause", 
+                        use_container_width=True, type="primary", key="pomo_start"):
                 if not st.session_state.pomo_running:
                     st.session_state.pomo_running = True
                     st.session_state.pomo_start_time = datetime.now()
@@ -213,9 +181,8 @@ class PomodoroTimer:
                 PomodoroTimer.water_plant()
                 st.rerun()
         
-        # Show status message when timer completes
-        if time_left == 0 and not st.session_state.pomo_running:
-            if st.session_state.pomo_mode == 'break':
-                st.success("✨ Break time! Stretch and relax~")
-            else:
-                st.success("🎉 Work session complete! Great job!")
+        # Auto-refresh if timer is running (but not too often to avoid crashes)
+        if st.session_state.pomo_running:
+            import time as pytime
+            pytime.sleep(0.5)  # Small delay to prevent rapid reruns
+            st.rerun()
