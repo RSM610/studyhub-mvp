@@ -186,7 +186,7 @@ def render_chat():
     
     st.markdown("---")
     
-    # Show resources in expandable WITH DOWNLOAD
+    # Show resources in expandable WITH REAL DOWNLOAD
     with st.expander(f"📚 View {len(subject_files)} Resources", expanded=False):
         if len(subject_files) == 0:
             st.info(f"No resources yet. Upload some materials to get started!")
@@ -197,16 +197,25 @@ def render_chat():
                     st.write(f"📄 **{file_data.get('file_name', 'Unknown')}**")
                     st.caption(f"Size: {file_data.get('file_size', 0) / 1024:.1f} KB")
                 with col2:
-                    # Download button instead of Info button
-                    download_data = f"File: {file_data.get('file_name', 'Unknown')}\nSubject: {subject_full_name}\nDoc ID: {doc_id}"
-                    st.download_button(
-                        label="📥 Download",
-                        data=download_data.encode(),
-                        file_name=f"{file_data.get('file_name', 'file.txt')}",
-                        mime="text/plain",
-                        key=f"dl_chat_{doc_id}",
-                        use_container_width=True
-                    )
+                    # Real download button with actual file content
+                    storage_path = file_data.get('storage_path')
+                    
+                    if storage_path:
+                        file_content = FirebaseOps.download_file_from_storage(storage_path)
+                        
+                        if file_content:
+                            st.download_button(
+                                label="📥 Download",
+                                data=file_content,
+                                file_name=file_data.get('file_name', 'file'),
+                                mime="application/octet-stream",
+                                key=f"dl_chat_{doc_id}",
+                                use_container_width=True
+                            )
+                        else:
+                            st.error("File not found")
+                    else:
+                        st.warning("No file")
     
     st.markdown("---")
     

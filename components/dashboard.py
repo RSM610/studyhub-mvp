@@ -6,7 +6,7 @@ from config.firebase_config import db
 import base64
 
 def render_dashboard():
-    """Render cute main dashboard with subject selection + DOWNLOAD"""
+    """Render cute main dashboard with subject selection + REAL DOWNLOAD"""
     
     # Get subjects from Firebase (dynamic)
     try:
@@ -189,19 +189,26 @@ def render_dashboard():
                     st.caption(f"Uploaded: {file_data.get('upload_time', 'N/A')}")
                 
                 with col3:
-                    # Create download button
-                    # Note: This creates a placeholder - you need to store actual files
-                    # in Firebase Storage or another storage solution
-                    download_data = f"File: {file_data.get('file_name', 'Unknown')}\nSubject: {subject_full_name}\nDoc ID: {doc_id}"
+                    # Real download button with actual file content
+                    storage_path = file_data.get('storage_path')
                     
-                    st.download_button(
-                        label="⬇️",
-                        data=download_data.encode(),
-                        file_name=f"{file_data.get('file_name', 'file.txt')}",
-                        mime="text/plain",
-                        key=f"dl_{doc_id}",
-                        use_container_width=True
-                    )
+                    if storage_path:
+                        # Get file content from Firebase Storage
+                        file_content = FirebaseOps.download_file_from_storage(storage_path)
+                        
+                        if file_content:
+                            st.download_button(
+                                label="⬇️",
+                                data=file_content,
+                                file_name=file_data.get('file_name', 'file'),
+                                mime="application/octet-stream",
+                                key=f"dl_{doc_id}",
+                                use_container_width=True
+                            )
+                        else:
+                            st.error("File not found")
+                    else:
+                        st.warning("No file available")
                 
                 st.markdown("---")
         
@@ -244,7 +251,7 @@ def render_dashboard():
                         try:
                             file_bytes = file.getvalue()
                             
-                            # Save to Firebase
+                            # Save to Firebase Storage + Firestore
                             result = FirebaseOps.save_uploaded_file(
                                 user_id,
                                 file.name,
